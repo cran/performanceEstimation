@@ -21,7 +21,7 @@
 ## Luis Torgo, Aug 2013
 ## ==============================================================
 ##
-performanceEstimation <- function(tasks,workflows,setts,...) {
+performanceEstimation <- function(tasks,workflows,estTask,...) {
 
   if (!is(tasks,'list')) tasks <- list(tasks)
   if (!is(workflows,'list')) workflows <- list(workflows)
@@ -30,7 +30,7 @@ performanceEstimation <- function(tasks,workflows,setts,...) {
     names(workflows) <- paste('var',1:length(workflows),sep='.')
   
   nTasks <- length(tasks)
-  taskNames <- sapply(tasks,function(x) x@name)
+  taskNames <- sapply(tasks,function(x) x@taskName)
   nWFs <- length(workflows)
   wfNames <- sapply(workflows,function(x) x@name)
   
@@ -38,39 +38,38 @@ performanceEstimation <- function(tasks,workflows,setts,...) {
   names(allRes) <- taskNames
   
   cat('\n\n##### PERFORMANCE ESTIMATION USING ',
-      switch(class(setts),
-             CvSettings='CROSS VALIDATION',
-             HldSettings='HOLD OUT',
-             McSettings='MONTE CARLO',
-             BootSettings='BOOTSTRAP',
-             LoocvSettings='LOOCV',
+      switch(class(estTask@method),
+             CV='CROSS VALIDATION',
+             Holdout='HOLD OUT',
+             MonteCarlo='MONTE CARLO',
+             Bootstrap='BOOTSTRAP',
+             LOOCV='LOOCV',
              ),
       ' #####')
   
   for(d in 1:length(tasks)) {
 
-    cat('\n\n** PREDICTIVE TASK ::',tasks[[d]]@name)
+    cat('\n\n** PREDICTIVE TASK ::',tasks[[d]]@taskName)
 
     taskRes <- vector("list",nWFs)
     names(taskRes) <- wfNames
     ##rr <- NULL
     for (s in 1:length(workflows)) {
 
-      cat('\n\n++ MODEL/WORKFLOW ::',workflows[[s]]@func,
-          ' variant -> ',names(workflows)[s],'\n')
-
+      cat('\n\n++ MODEL/WORKFLOW ::',workflows[[s]]@name,"\n")
+      
       taskRes[[s]] <- do.call(
-               switch(class(setts),
-                      CvSettings='cvEstimates',
-                      HldSettings='hldEstimates',
-                      BootSettings='bootEstimates',
-                      McSettings='mcEstimates',
-                      LoocvSettings='loocvEstimates'
+               switch(class(estTask@method),
+                      CV='cvEstimates',
+                      Holdout='hldEstimates',
+                      Bootstrap='bootEstimates',
+                      MonteCarlo='mcEstimates',
+                      LOOCV='loocvEstimates'
                       ),
 
                c(list(workflows[[s]],
                     tasks[[d]],
-                    setts),...)
+                    estTask),...)
                          )
     }
     
@@ -104,93 +103,101 @@ performanceEstimation <- function(tasks,workflows,setts,...) {
 ## Example runs:
 ## x <- cvEstimates(Workflow('cv.rpartXse',se=2),
 ##                      PredTask(medv~.,Boston),
-##                      CvSettings(1,10,1234))
+##                      CvTask(1,10,1234))
 ##
-cvEstimates <- function(wf,task,sets) {
+cvEstimates <- function(wf,task,estTask,cluster) {
+    ## the function to use on the loop (either sequential or parallel)
+    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
 
-  show(sets)
-
-  ## Did the user supplied the data splits for all folds and repetitions?
-  userSplit <- !is.null(sets@dataSplits)
-  
-  n <- nrow(task@data)
-  if (!userSplit) n.each.part <- n %/% sets@nFolds
-
-  #results <- EstimationResults(task,wf,sets,matrix(NA,0,0))
-  #itsI <- results <- NULL
-  scores <- NULL
-  preds <- vector("list",sets@nFolds*sets@nReps)
-  info <- vector("list",sets@nFolds*sets@nReps)
-
-  if (!userSplit && sets@strat) {  # stratified sampling
-    respVals <- responseValues(task@formula,task@data)
-    regrProb <- is.numeric(respVals)
-    if (regrProb) {  # regression problem
-      ## the bucket to which each case belongs  
-      b <- cut(respVals,10)  # this 10 should be parametrizable
-    } else {
-      b <- respVals
-    }
-    ## how many on each bucket
-    bc <- table(b)
-    ## how many should be on each test partition
-    bct <- bc %/% sets@nFolds
-    ## still missing (due to rounding effects of the previous statement)
-    ##rem <- n.test-sum(bct)
-    ##ib <- 1
-    ##nb <- length(bct)
-    ##while (rem) 
-    ##  if (bct[ib] < bc[ib]) {
-    ##    bct[ib] <- bct[ib]+1
-    ##    rem <- rem-1
-    ##    ib <- ib %% nb + 1
-    ##  }
-
-  }
-  
-  for(r in 1:sets@nReps) {
-    cat('Repetition ',r,'\nFold:')
-
-    if (!userSplit) {
-      set.seed(sets@seed*r)
-      permutation <- sample(n)
-      perm.data <- task@data[permutation,]
-    } else perm.data <- task@data
-
-    for(i in seq(sets@nFolds)) {
-      itN <- (r-1)*sets@nFolds+i  # the iteration number
-      cat(' ',i)
-      
-      if (!userSplit) {
-        if (sets@strat) {
-          out.fold <- c()
-          for(x in seq(along=levels(b))) 
-            if (bct[x]) out.fold <- c(out.fold,which(b == levels(b)[x])[((i-1)*bct[x]+1):((i-1)*bct[x]+bct[x])])
-        } else {
-          out.fold <- ((i-1)*n.each.part+1):(i*n.each.part)
+    ## registering (and eventually creating) the parallel backend
+    if (!missing(cluster)) {
+        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+        else {
+            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
+            doParallel::registerDoParallel(cl)
+            on.exit(parallel::stopCluster(cl))
         }
-      } else out.fold <- outFold(sets@dataSplits,i,r)
-      
-      it.res <- runWorkflow(wf,
-                            task@formula,
-                            perm.data[-out.fold,],
-                            perm.data[out.fold,])
-      
-      scores <- rbind(scores,it.res@scores)
-      preds[[itN]] <- it.res@predictions
-      info[[itN]] <- it.res@extraInfo
-      
+        cat(sprintf('cvEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
     }
-    cat('\n')
-  }
+            
+        
+    show(estTask)
 
-  ## randomize the number generator to avoid undesired
-  ## problems caused by inner set.seed()'s
-  set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+    ## Did the user supplied the data splits for all folds and repetitions?
+    userSplit <- !is.null(estTask@method@dataSplits)
+    
+    n <- nrow(eval(task@dataSource))
+    if (!userSplit) n.each.part <- n %/% estTask@method@nFolds
+    
+    nits <- estTask@method@nFolds*estTask@method@nReps
+    itsInfo <- vector("list",nits)
 
-  EstimationResults(task,wf,sets,scores,preds,info)
+    ## Stratefied sampling stuff
+    if (!userSplit && estTask@method@strat) { 
+        respVals <- responseValues(task@formula,eval(task@dataSource))
+        regrProb <- is.numeric(respVals)
+        if (regrProb) {  # regression problem
+            ## the bucket to which each case belongs  
+            b <- cut(respVals,10)  # this 10 should be parametrizable
+        } else {
+            b <- respVals
+        }
+        ## how many on each bucket
+        bc <- table(b)
+        ## how many should be on each test partition
+        bct <- bc %/% estTask@method@nFolds
+
+    }
+
+    permutation <- 1:n
+    it <- NULL  # dummy assignment due to Note on cran-check
+    if (missing(cluster)) cat("Iteration :")
+    itsInfo <- foreach::foreach(it=1:nits,
+                                .packages=.loadedPackages(),
+                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
+                                ) %fun%  {
+        
+        if (missing(cluster)) cat(" ",it)
+        nfold <- (it - 1) %% estTask@method@nFolds + 1
+        nrep <- (it - 1) %/% estTask@method@nFolds + 1
+        
+        if (!userSplit) {
+            set.seed(estTask@method@seed*nrep)
+            permutation <- sample(n)
+        }
+        
+        if (!userSplit) {
+            if (estTask@method@strat) {
+                out.fold <- c()
+                for(x in seq(along=levels(b))) 
+                    if (bct[x]) out.fold <- c(out.fold,which(b[permutation] == levels(b)[x])[((nfold-1)*bct[x]+1):((nfold-1)*bct[x]+bct[x])])
+            } else {
+                out.fold <- ((nfold-1)*n.each.part+1):(nfold*n.each.part)
+            }
+        } else out.fold <- outFold(estTask@method@dataSplits,it)
+        
+        it.res <- runWorkflow(wf,
+                              task@formula,
+                                        #perm.data[-out.fold,],
+                              eval(task@dataSource)[permutation[-out.fold],],
+                                        #perm.data[out.fold,])
+                              eval(task@dataSource)[permutation[out.fold],])
+        
+        list(preds=it.res@predictions,
+             info=it.res@extraInfo,
+             train=permutation[-out.fold])
+        
+    }
+    
+    ## randomize the number generator to avoid undesired
+    ## problems caused by inner set.seed()'s
+    set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+    
+    ## Calculate the metrics estimation
+    scores <- .scoresIts(task,estTask,itsInfo)
+    
+    EstimationResults(task,wf,estTask,scores,itsInfo)
 }
-
 
 #################################################################
 # Hold Out Experiments
@@ -214,85 +221,96 @@ cvEstimates <- function(wf,task,sets) {
 # Example runs:
 # x <- hldEstimates(learner('cv.rpartXse',list(se=2)),
 #              dataset(medv~.,Boston),
-#              hldSettings(4,0.25,1234))
+#              hldTask(4,0.25,1234))
 #
-hldEstimates <- function(wf,task,sets) {
+hldEstimates <- function(wf,task,estTask,cluster) {
+    ## the function to use on the loop (either sequential or parallel)
+    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
 
-  show(sets)
-
-  ## Did the user supplied the data splits for all folds and repetitions?
-  userSplit <- !is.null(sets@dataSplits)
-
-  n <- nrow(task@data)
-  if (!userSplit) n.test <- as.integer(n * sets@hldSz)
-
-  scores <- NULL
-  preds <- vector("list",sets@nReps)
-  info <- vector("list",sets@nReps)
-
-  
-  if (!userSplit & sets@strat) {  # stratified sampling
-    respVals <- responseValues(task@formula,task@data)
-    regrProb <- is.numeric(respVals)
-    if (regrProb) {  # regression problem
-      # the bucket to which each case belongs  
-      b <- cut(respVals,10)  # this 10 should be parameterizable
-    } else {
-      b <- respVals
+    ## registering (and eventually creating) the parallel backend
+    if (!missing(cluster)) {
+        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+        else {
+            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
+            doParallel::registerDoParallel(cl)
+            on.exit(parallel::stopCluster(cl))
+        }
+        cat(sprintf('hldEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
     }
-    # how many on each bucket
-    bc <- table(b)
-    # how many should be on each test partition
-    bct <- as.integer(bc * sets@hldSz)
-    # still missing (due to rounding effects of the previous statement)
-    #rem <- n.test-sum(bct)
-    #ib <- 1
-    #nb <- length(bct)
-    #while (rem) 
-    #  if (bct[ib] < bc[ib]) {
-    #    bct[ib] <- bct[ib]+1
-    #    rem <- rem-1
-    #    ib <- ib %% nb + 1
-    #  }
-  }
 
-  cat('Repetition :')
-  for(r in 1:sets@nReps) {
-    cat(' ',r)
+    show(estTask)
 
-    if (!userSplit) {
-      set.seed(sets@seed*r)
-      permutation <- sample(n)
-      perm.data <- task@data[permutation,]
-    } else perm.data <- task@data
+    ## Did the user supplied the data splits for all folds and repetitions?
+    userSplit <- !is.null(estTask@method@dataSplits)
 
-    if (!userSplit) {
-      if (sets@strat) {
-        out.fold <- c()
-        for(x in seq(along=levels(b))) 
-          if (bct[x]) out.fold <- c(out.fold,which(b == levels(b)[x])[1:bct[x]])
-      } else {
-        out.fold <- 1:n.test
-      }
-    } else out.fold <- outFold(sets@dataSplits,r)
+    n <- nrow(eval(task@dataSource))
+    if (!userSplit) n.test <- as.integer(n * estTask@method@hldSz)
 
-    it.res <- runWorkflow(wf,
-                          task@formula,
-                          perm.data[-out.fold,],
-                          perm.data[out.fold,])
+    itsInfo <- vector("list",estTask@method@nReps)
 
-    scores <- rbind(scores,it.res@scores)
-    preds[[r]] <- it.res@predictions
-    info[[r]] <- it.res@extraInfo
+    if (!userSplit & estTask@method@strat) {  # stratified sampling
+        respVals <- responseValues(task@formula,eval(task@dataSource))
+        regrProb <- is.numeric(respVals)
+        if (regrProb) {  # regression problem
+            ## the bucket to which each case belongs  
+            b <- cut(respVals,10)  # this 10 should be parameterizable
+        } else {
+            b <- respVals
+        }
+        ## how many on each bucket
+        bc <- table(b)
+        ## how many should be on each test partition
+        bct <- as.integer(bc * estTask@method@hldSz)
+    }
+
+    permutation <- 1:n
+
+    r <- NULL  # dummy assignment due to Note on cran-check
+    if (missing(cluster)) cat("Iteration :")
+    itsInfo <- foreach::foreach(r=1:estTask@method@nReps,
+                                .packages=.loadedPackages(),
+                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
+                                ) %fun%  {
+
+
+        if (missing(cluster)) cat(' ',r)
+
+        if (!userSplit) {
+            set.seed(estTask@method@seed*r)
+            permutation <- sample(n)
+        } 
+
+
+        if (!userSplit) {
+            if (estTask@method@strat) {
+                out.fold <- c()
+                for(x in seq(along=levels(b))) 
+                    if (bct[x]) out.fold <- c(out.fold,which(b[permutation] == levels(b)[x])[1:bct[x]])
+            } else {
+                out.fold <- 1:n.test
+            }
+        } else out.fold <- outFold(estTask@method@dataSplits,r)
+
+        it.res <- runWorkflow(wf,
+                              task@formula,
+                              eval(task@dataSource)[permutation[-out.fold],],
+                              eval(task@dataSource)[permutation[out.fold],])
+
+        list(preds=it.res@predictions,
+             info=it.res@extraInfo,
+             train=permutation[-out.fold])
           
-  }
-  cat('\n')
+    }
+    cat('\n')
   
-  # randomize the number generator to avoid undesired
-  # problems caused by inner set.seed()'s
-  set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+    ## randomize the number generator to avoid undesired
+    ## problems caused by inner set.seed()'s
+    set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
 
-  EstimationResults(task,wf,sets,scores,preds,info)
+    ## Calculate the metrics estimation
+    scores <- .scoresIts(task,estTask,itsInfo)
+    
+    EstimationResults(task,wf,estTask,scores,itsInfo)
 }
 
 
@@ -321,36 +339,63 @@ hldEstimates <- function(wf,task,sets) {
 # x <- loocvEstimates(learner('cv.rpartXse',list(se=2)),
 #            dataset(medv~.,Boston))
 #
-loocvEstimates <- function(wf,task,sets,verbose=FALSE) {
+loocvEstimates <- function(wf,task,estTask,verbose=FALSE,cluster) {
+    ## the function to use on the loop (either sequential or parallel)
+    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
 
-  show(sets)
+    ## registering (and eventually creating) the parallel backend
+    if (!missing(cluster)) {
+        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+        else {
+            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
+            doParallel::registerDoParallel(cl)
+            on.exit(parallel::stopCluster(cl))
+        }
+        cat(sprintf('loocvEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+    }
 
-  n <- nrow(task@data)
+    show(estTask)
 
-  scores <- NULL
-  preds <- vector("list",1)
-  info <- vector("list",n)
+    ## Did the user supplied the data splits for all folds and repetitions?
+    userSplit <- !is.null(estTask@method@dataSplits)
 
+    n <- nrow(eval(task@dataSource))
 
-  if (verbose) cat('Iteration: ')
-  for(r in 1:n) {
-    if (verbose) cat('*')
+    itsInfo <- vector("list",n)
 
-    set.seed(sets@seed*r)
+    r <- NULL  # dummy assignment due to Note on cran-check
+    if (verbose && missing(cluster)) cat("Iteration :")
+    itsInfo <- foreach::foreach(r=1:n,
+                                .packages=.loadedPackages(),
+                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
+                                ) %fun%  {
 
-    it.res <- runWorkflow(wf,
-                          task@formula,
-                          task@data[-r,],
-                          task@data[r,])
+        if (verbose && missing(cluster)) cat('*')
+
+        if (!userSplit) {
+            set.seed(estTask@method@seed*r)
+            out.fold <- r
+        } else out.fold <- outFold(estTask@method@dataSplits,r)
+
+        it.res <- runWorkflow(wf,
+                              task@formula,
+                              eval(task@dataSource)[-out.fold,],
+                              eval(task@dataSource)[out.fold,])
+        
+        list(preds=it.res@predictions,
+             info=it.res@extraInfo,
+             train=(1:n)[-out.fold])
+    }
+    if (verbose && missing(cluster)) cat('\n')
     
-    scores <- rbind(scores,it.res@scores)
-    preds[[1]] <- rbind(preds[[1]],it.res@predictions)
-    info[[r]] <- it.res@extraInfo
-      
-  }
-  if (verbose) cat('\n')
-  
-  EstimationResults(task,wf,sets,scores,preds,info)
+    ## randomize the number generator to avoid undesired
+    ## problems caused by inner set.seed()'s
+    set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+    
+    ## Calculate the metrics estimation
+    scores <- .scoresIts(task,estTask,itsInfo)
+    
+    EstimationResults(task,wf,estTask,scores,itsInfo)
 
 }
 
@@ -378,146 +423,239 @@ loocvEstimates <- function(wf,task,sets,verbose=FALSE) {
 # Example runs:
 # x <- bootEstimates('cv.rpartXse',list(se=2)),
 #                      dataset(medv~.,Boston),
-#                      bootSettings(1234,10))
+#                      bootTask(1234,10))
 #
-bootEstimates <- function(wf,task,sets,verbose=TRUE) {
+bootEstimates <- function(wf,task,estTask,cluster) {
+    ## the function to use on the loop (either sequential or parallel)
+    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
 
-  show(sets)
+    ## registering (and eventually creating) the parallel backend
+    if (!missing(cluster)) {
+        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+        else {
+            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
+            doParallel::registerDoParallel(cl)
+            on.exit(parallel::stopCluster(cl))
+        }
+        cat(sprintf('bootEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+    }
 
-  if (sets@type == '.632')
-      resub <- runWorkflow(wf,task@formula,task@data,task@data)
-      
+    show(estTask)
 
-  ## Did the user supplied the data splits for all folds and repetitions?
-  userSplit <- !is.null(sets@dataSplits)
-
-  n <- nrow(task@data)
-
-  scores <- NULL
-  preds <- vector("list",sets@nReps)
-  info <- vector("list",sets@nReps)
-
-  cat('Repetition :')
-  for(r in 1:sets@nReps) {
-    cat(' ',r)
-
-    if (!userSplit) {
-      set.seed(sets@seed*r)
-      idx <- sample(n,n,replace=T)
-    } else idx <- (1:n)[-outFold(sets@dataSplits,r)]
+    if (estTask@method@type == '.632')
+        resub <- runWorkflow(wf,task@formula,eval(task@dataSource),eval(task@dataSource))
     
-    it.res <- runWorkflow(wf,
-                          task@formula,
-                          task@data[idx,],
-                          task@data[-idx,])
+    ## Did the user supplied the data splits for all folds and repetitions?
+    userSplit <- !is.null(estTask@method@dataSplits)
 
-    if (sets@type == ".632") scores <- rbind(scores,0.632*it.res@scores+0.368*resub@scores)
-    else scores <- rbind(scores,it.res@scores)
+    n <- nrow(eval(task@dataSource))
     
-    preds[[r]] <- it.res@predictions
-    info[[r]] <- it.res@extraInfo
+    itsInfo <- vector("list",estTask@method@nReps)
 
+    r <- NULL  # dummy assignment due to Note on cran-check
+    if (missing(cluster)) cat("Iteration :")
+    itsInfo <- foreach::foreach(r=1:estTask@method@nReps,
+                                .packages=.loadedPackages(),
+                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
+                                ) %fun%  {
+
+
+        if (missing(cluster)) cat(' ',r)
+
+        if (!userSplit) {
+            set.seed(estTask@method@seed*r)
+            idx <- sample(n,n,replace=T)
+            it.res <- runWorkflow(wf,
+                                  task@formula,
+                                  eval(task@dataSource)[idx,],
+                                  eval(task@dataSource)[-idx,])
+            list(preds=it.res@predictions,
+                 info=it.res@extraInfo,
+                 train=idx)
+        } else {
+            it.res <- runWorkflow(wf,
+                                  task@formula,
+                                  eval(task@dataSource)[outFold(estTask@method@dataSplits,r,"train"),],
+                                  eval(task@dataSource)[outFold(estTask@method@dataSplits,r),])
+            list(preds=it.res@predictions,
+                 info=it.res@extraInfo,
+                 train=outFold(estTask@method@dataSplits,r,"train"))
+
+        }
       
-  }
-  cat('\n')
+    }
+    cat('\n')
 
-  # randomize the number generator to avoid undesired
-  # problems caused by inner set.seed()'s
-  set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+    ## randomize the number generator to avoid undesired
+    ## problems caused by inner set.seed()'s
+    set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
   
-  EstimationResults(task,wf,sets,scores,preds,info)
+    ## Calculate the metrics estimation
+    if (estTask@method@type == ".632") {  # this method is different from all others
+        trReq <- any(estTask@metrics %in% c("nmse","nmae","theil"))
+        nIts <- length(itsInfo)
+        if (estTask@evaluator=="" ) 
+            if (is.classification(task)) estTask@evaluator <- "classificationMetrics"
+            else                         estTask@evaluator <- "regressionMetrics"
+        scores <- matrix(NA,nrow=nIts,ncol=length(estTask@metrics))
+        colnames(scores) <- estTask@metrics
+        wts <- intersect(estTask@metrics,c("trTime","tsTime","totTime"))
+        predMs <- setdiff(estTask@metrics,wts)
+        if (length(predMs)) {
+            if (trReq) {
+                resubScores <- do.call(estTask@evaluator,
+                                       c(list(trues=resub@predictions[,"true"],
+                                              preds=resub@predictions[,"predicted"],
+                                              stats=predMs,
+                                              train.y=eval(task@dataSource)[1:n,task@target]),
+                                         estTask@evaluator.pars))
+            } else {
+                resubScores <- do.call(estTask@evaluator,
+                                       c(list(trues=resub@predictions[,"true"],
+                                              preds=resub@predictions[,"predicted"],
+                                              stats=predMs),
+                                         estTask@evaluator.pars))
+            }
+        }
+        for(i in 1:nIts) {
+            if (length(predMs)) {
+                if (trReq) {
+                    scores[i,predMs] <- 0.632*do.call(estTask@evaluator,
+                                                      c(list(trues=itsInfo[[i]]$preds[,"true"],
+                                                             preds=itsInfo[[i]]$preds[,"predicted"],
+                                                             stats=predMs,
+                                                             train.y=eval(task@dataSource)[itsInfo[[i]]$train,task@target]),
+                                                        estTask@evaluator.pars)) +
+                                                            0.368*resubScores
+                } else {
+                    scores[i,predMs] <- 0.632*do.call(estTask@evaluator,
+                                                      c(list(trues=itsInfo[[i]]$preds[,"true"],
+                                                             preds=itsInfo[[i]]$preds[,"predicted"],
+                                                             stats=predMs),
+                                                        estTask@evaluator.pars)) +
+                                                            0.368*resubScores
+                }
+            }
+            if (length(wts)) {
+                allts <- as.numeric(itsInfo[[i]]$info$times)
+                scores[i,wts] <- c(trTime=allts[1],tsTime=allts[2],
+                                   totTime=allts[1]+allts[2])[wts]
+            }
+        }
+        
+    } else scores <- .scoresIts(task,estTask,itsInfo)
+    
+    
+    EstimationResults(task,wf,estTask,scores,itsInfo)
 
 }
 
 
 
 #################################################################
-# Monte Carlo Experiments
+## Monte Carlo Experiments
 #################################################################
 
 
 
-# =====================================================
-# Function that performs a Monte Carlo experiment of a 
-# system on a given data set.
-# The function is completely generic. The generality comes
-# from the fact that the function that the user provides
-# as the system to evaluate, needs in effect to be a
-# user-defined function that takes care of the learning,
-# testing and calculation of the statistics that the user
-# wants to estimate through this experiment. A few example
-# functions are provided.
-# =====================================================
-# Luis Torgo, Aug 2009
-# =====================================================
+## =====================================================
+## Function that performs a Monte Carlo experiment of a 
+## system on a given data set.
+## The function is completely generic. The generality comes
+## from the fact that the function that the user provides
+## as the system to evaluate, needs in effect to be a
+## user-defined function that takes care of the learning,
+## testing and calculation of the statistics that the user
+## wants to estimate through this experiment. A few example
+## functions are provided.
+## =====================================================
+## Luis Torgo, Aug 2009
+## =====================================================
 
-mcEstimates <- function(wf,
-                       task,
-                       mcSet,verbose=TRUE) {
+mcEstimates <- function(wf, task, estTask, verbose=TRUE, cluster) {
+    ## the function to use on the loop (either sequential or parallel)
+    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
 
-  show(mcSet)
-
-  ## Did the user supplied the data splits for all  repetitions?
-  userSplit <- !is.null(mcSet@dataSplits)
-  
-  scores <- NULL
-  preds <- vector("list",mcSet@nReps)
-  info <- vector("list",mcSet@nReps)
-
-  n <- NROW(task@data)
-
-  if (!userSplit) {
-      train.size <- if (mcSet@szTrain < 1) as.integer(n*mcSet@szTrain) else mcSet@szTrain
-      test.size <- if (mcSet@szTest < 1) as.integer(n*mcSet@szTest) else mcSet@szTest
-      if (n-test.size+1 <= train.size+1) stop('mcEstimates:: Invalid train/test sizes.')
-  } else {
-      train.size <- NROW(mcSet@dataSplits[mcSet@dataSplits[,1] == "TRAIN" & mcSet@dataSplits[,3]==1 & mcSet@dataSplits[,4]==1,2])
-      test.size <- NROW(mcSet@dataSplits[mcSet@dataSplits[,1] == "TEST" & mcSet@dataSplits[,3]==1 & mcSet@dataSplits[,4]==1,2])
-  }
-  
-  set.seed(mcSet@seed)
-
-  if (!userSplit) {
-      selection.range <- (train.size+1):(n-test.size+1)
-      starting.points <- sort(sample(selection.range,mcSet@nReps))
-  } else {
-      starting.points <- sapply(1:mcSet@nReps,function(r) mcSet@dataSplits[mcSet@dataSplits[,1] == "TEST" & mcSet@dataSplits[,3]==1 & mcSet@dataSplits[,4]==r,2][1])
-  }
-
-
-  # main loop over all repetitions
-  for(it in seq(along=starting.points)) {
-    start <- starting.points[it]
-
-    if (verbose)  cat('Repetition ',it,'\n\t start test = ',
-                      start,'; test size = ',test.size,'\n')
-
-    if (!userSplit) {
-        rep.res <- runWorkflow(wf,
-                               task@formula,
-                               task@data[(start-train.size):(start-1),],
-                               task@data[start:(start+test.size-1),])
-    } else {
-        rep.res <- runWorkflow(wf,
-                               task@formula,
-                               task@data[mcSet@dataSplits[mcSet@dataSplits[,1] == "TRAIN" & mcSet@dataSplits[,3]==1 & mcSet@dataSplits[,4]==it,2],],
-                               task@data[mcSet@dataSplits[mcSet@dataSplits[,1] == "TEST" & mcSet@dataSplits[,3]==1 & mcSet@dataSplits[,4]==it,2],])
-
+    ## registering (and eventually creating) the parallel backend
+    if (!missing(cluster)) {
+        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+        else {
+            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
+            doParallel::registerDoParallel(cl)
+            on.exit(parallel::stopCluster(cl))
+        }
+        cat(sprintf('mcEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
     }
 
-    scores <- rbind(scores,rep.res@scores)
-    preds[[it]] <- rep.res@predictions
-    info[[it]] <- rep.res@extraInfo
+
+    show(estTask)
+
+    ## Did the user supplied the data splits for all  repetitions?
+    userSplit <- !is.null(estTask@method@dataSplits)
+    
+    itsInfo <- vector("list",estTask@method@nReps)
+
+    n <- NROW(eval(task@dataSource))
+
+    if (!userSplit) {
+        train.size <- if (estTask@method@szTrain < 1) as.integer(n*estTask@method@szTrain) else estTask@method@szTrain
+        test.size <- if (estTask@method@szTest < 1) as.integer(n*estTask@method@szTest) else estTask@method@szTest
+        if (n-test.size+1 <= train.size+1) stop('mcEstimates:: Invalid train/test sizes.',call.=FALSE)
+    } else {
+        train.size <- length(estTask@method@dataSplits[[1]][[1]]$train)
+        test.size <- length(estTask@method@dataSplits[[1]][[1]]$test)
+    }
+  
+    set.seed(estTask@method@seed)
+
+    if (!userSplit) {
+        selection.range <- (train.size+1):(n-test.size+1)
+        starting.points <- sort(sample(selection.range,estTask@method@nReps))
+    } else {
+        starting.points <- sapply(estTask@method@dataSplits[[1]], function(d) d$test[1])
+    }
+
+    it <- NULL  # dummy assignment due to Note on cran-check
+    itsInfo <- foreach::foreach(it=seq(along=starting.points),
+                                .packages=.loadedPackages(),
+                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
+                                ) %fun%  {
 
 
-  }
-  if (verbose) cat('\n')
 
-  ## randomize the number generator to avoid undesired
-  ## problems caused by inner set.seed()'s
-  set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+        start <- starting.points[it]
+        if (missing(cluster)) cat('Repetition ',it,'\n\t start test = ',
+                                  start,'; test size = ',test.size,'\n')
 
-  EstimationResults(task,wf,mcSet,scores,preds,info)
+
+        if (!userSplit) {
+            rep.res <- runWorkflow(wf,
+                                   task@formula,
+                                   eval(task@dataSource)[(start-train.size):(start-1),],
+                                   eval(task@dataSource)[start:(start+test.size-1),])
+        } else {
+            rep.res <- runWorkflow(wf,
+                                   task@formula,
+                                   eval(task@dataSource)[estTask@method@dataSplits[[1]][[it]]$train,],
+                                   eval(task@dataSource)[estTask@method@dataSplits[[1]][[it]]$test,])
+
+        }
+
+        list(preds=rep.res@predictions,
+             info=rep.res@extraInfo,
+             train=(start-train.size):(start-1))
+
+    }
+    cat('\n')
+
+    ## randomize the number generator to avoid undesired
+    ## problems caused by inner set.seed()'s
+    set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
+    
+    ## Calculate the metrics estimation
+    scores <- .scoresIts(task,estTask,itsInfo)
+    
+    EstimationResults(task,wf,estTask,scores,itsInfo)
 }
 
 
@@ -527,25 +665,24 @@ mcEstimates <- function(wf,
 # Small utility functions 
 # =====================================================
 
-is.regression <- function(formula,data) is.numeric(model.response(model.frame(formula,data)))
 
-is.classification <- function(formula,data) is.factor(model.response(model.frame(formula,data)))
+is.regression <- function(task) task@type == 'regr'
 
-responseValues <- function(formula,data) model.response(model.frame(formula,data))
+is.classification <- function(task) task@type == 'class'
+
+responseValues <- function(formula,data,na=NULL) model.response(model.frame(formula,data,na.action=na))
 
 
-##outFold <- function(ds,f,r)
-##  unlist(subset(ds,ds[,1] == "TEST" & ds[,3]==f & ds[,4]==r,colnames(ds)[2]))
-outFold <- function(ds,f,r=NULL)  {
-    if (is.null(r)) which(ds[,f])
-    else which(ds[[r]][,f])
-}
+## ----------------------------------------
+## Internal functions that are not exported
 
+outFold <- function(ds,it,what="test") if (is.list(ds[[1]])) ds[[it]][[what]] else ds[[it]]
 
 .scores2summary <- function(obj)
     apply(obj@iterationsScores,2,function(x)
-          c(avg=mean(x,na.rm=T),std=sd(x,na.rm=T),
-            min=min(x,na.rm=T),max=max(x,na.rm=T),
+          c(avg=mean(x,na.rm=TRUE),std=sd(x,na.rm=TRUE),
+            med=median(x,na.rm=TRUE),iqr=IQR(x,na.rm=TRUE),
+            min=min(x,na.rm=TRUE),max=max(x,na.rm=TRUE),
             invalid=sum(is.na(x)))
           )
 
@@ -561,18 +698,59 @@ outFold <- function(ds,f,r=NULL)  {
 
 .statScores <- function(compRes,stat=1) {
     r <- list()
-    for(t in compRes@tasks) {
+    for(t in compRes) {
         ws <- NULL
         for(w in t)
             ws <- cbind(ws,t(.scores2summary(w)[stat,,drop=FALSE]))
         colnames(ws) <- names(t)
         r <- c(r,list(ws))
     }
-    names(r) <- names(compRes@tasks)
+    names(r) <- names(compRes)
     r
 }
 
 ## Though simpler and more elegant this one fails due to over-simplification of
 ## sapply when we have only one metric (and it did not worked with simplify=FALSE
 ## on sapply)
-## .statScores.old <- function(compRes,stat=1) lapply(compRes@tasks,function(t) sapply(t,function(w) .scores2summary(w)[stat,,drop=FALSE]))
+## .statScores.old <- function(compRes,stat=1) lapply(compRes,function(t) sapply(t,function(w) .scores2summary(w)[stat,,drop=FALSE]))
+
+
+## calculates the scores of all iterations of an estimation exp
+.scoresIts <- function(task,estTask,its) {
+    trReq <- any(estTask@metrics %in% c("nmse","nmae","theil"))
+
+    nIts <- length(its)
+    if (estTask@evaluator=="" ) 
+        if (is.classification(task)) estTask@evaluator <- "classificationMetrics"
+        else                         estTask@evaluator <- "regressionMetrics"
+    scores <- matrix(NA,nrow=nIts,ncol=length(estTask@metrics))
+    colnames(scores) <- estTask@metrics
+    wts <- intersect(estTask@metrics,c("trTime","tsTime","totTime"))
+    predMs <- setdiff(estTask@metrics,wts)
+    for(i in 1:nIts) {
+        if (length(predMs)) {
+            if (trReq) {
+                scores[i,predMs] <- do.call(estTask@evaluator,
+                                            c(list(trues=its[[i]]$preds[,"true"],
+                                                   preds=its[[i]]$preds[,"predicted"],
+                                                   stats=predMs,
+                                                   train.y=eval(task@dataSource)[its[[i]]$train,task@target]),
+                                              estTask@evaluator.pars))
+            } else {
+                scores[i,predMs] <- do.call(estTask@evaluator,
+                                            c(list(trues=its[[i]]$preds[,"true"],
+                                                   preds=its[[i]]$preds[,"predicted"],
+                                                   stats=predMs),
+                                              estTask@evaluator.pars))
+            }
+        }
+        if (length(wts)) {
+            allts <- as.numeric(its[[i]]$info$times)
+            scores[i,wts] <- c(trTime=allts[1],tsTime=allts[2],totTime=allts[1]+allts[2])[wts]
+        }
+    }
+    scores
+}
+
+
+.loadedPackages <- function(bases=c("datasets","grDevices","stats","utils","base","graphics","methods")) setdiff(sapply(strsplit(search()[grep("package",search())],":"),function(x) x[2]),bases)

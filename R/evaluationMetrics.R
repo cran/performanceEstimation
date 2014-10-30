@@ -17,7 +17,7 @@ regressionMetrics <- function(trues,preds,
                       stats="mse",
                       train.y=NULL)
 {
-    knownMetrics <- c('mae','mse','rmse','mape','nmse','nmae')
+    knownMetrics <- c('mae','mse','rmse','mape','nmse','nmae','theil')
     if (identical(stats,"all"))
         stats <- if (is.null(train.y)) setdiff(knownMetrics,c("nmse","nmae")) else knownMetrics
     
@@ -30,7 +30,10 @@ regressionMetrics <- function(trues,preds,
     sae <- sum(abs(trues-preds))
     sse <- sum((trues-preds)^2)
     r <- c(mae=sae/N,mse=sse/N,rmse=sqrt(sse/N),mape=sum(abs((trues-preds)/trues))/N)
-    if (!is.null(train.y)) r <- c(r,c(nmse=sse/sum((trues-mean(train.y))^2),nmae=sae/sum(abs(trues-mean(train.y)))))
+    if (!is.null(train.y))
+        r <- c(r,c(nmse=sse/sum((trues-mean(train.y))^2),
+                   theil=sum((trues-preds)^2)/sum((c(train.y[length(train.y)],trues[-length(trues)])-preds)^2),
+                   nmae=sae/sum(abs(trues-mean(train.y)))))
     return(r[stats])
 }
 
@@ -121,29 +124,6 @@ classificationMetrics <- function(trues,preds,
 }   
 
 
-# =====================================================================
-# Function to calculate some standard  evaluation statistics for time series
-# problems
-# ---------------------------------------------------------------------
-# L. Torgo (2013)
-#
-# Examples:
-# s <- timeseriesMetrics(tr,ps,train.y=data[,'Y'])
-# s <- timeseriesMetrics(tr,ps,stats=c('mse','mae'))
-#
-timeseriesMetrics <- function(trues,preds,
-                    stats='mse',
-                    train.y=NULL)
-{
-    if (('theil' %in% stats) && is.null(train.y))
-        stop('timeseriesMetrics:: train.y parameter not specified.',call.=FALSE)
-
-    other <- setdiff(stats,'theil')
-    r <- if (length(other) > 0) regressionMetrics(trues,preds,other,train.y) else c()
-    if ('theil' %in% stats) r <- c(r,theil=sum((trues-preds)^2)/sum((c(train.y[length(train.y)],trues[-length(trues)])-preds)^2))
-
-    if (identical(stats,"all")) return(r) else return(r[stats])
-}
 
 
 

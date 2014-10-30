@@ -26,13 +26,15 @@ getWorkflow(var, obj)
 \value{
   A \code{\linkS4class{Workflow}} object
 }
-\references{ Torgo, L. (2013) \emph{An Infra-Structure for Performance
-    Estimation and Experimental Comparison of Predictive Models}.
-  \url{https://github.com/ltorgo/performanceEstimation}  
+\references{ Torgo, L. (2014) \emph{An Infra-Structure for Performance
+    Estimation and Experimental Comparison of Predictive Models in R}. arXiv:1412.0436 [cs.MS]
+  \url{http://arxiv.org/abs/1412.0436}  
 }
 \author{ Luis Torgo \email{ltorgo@dcc.fc.up.pt} }
 \seealso{
-  \code{\linkS4class{Workflow}}, \code{\link{performanceEstimation}}
+  \code{\linkS4class{Workflow}},
+  \code{\link{runWorkflow}},  
+  \code{\link{performanceEstimation}}
 }
 \examples{
 \dontrun{
@@ -47,12 +49,12 @@ data(mtcars)
 ## running the estimation experiment
 res <- performanceEstimation(
   c(PredTask(Infant.Mortality ~ .,swiss),PredTask(mpg ~ ., mtcars)),
-  c(workflowVariants("standardWF",learner="svm",
+  c(workflowVariants(learner="svm",
                      learner.pars=list(cost=c(1,10),gamma=c(0.01,0.5))),
-    workflowVariants("standardWF",learner="rpartXse",
+    workflowVariants(learner="rpartXse",
                      learner.pars=list(se=c(0,0.5,1)))
   ),
-  CvSettings(nReps=1,nFolds=10,seed=1234)
+  EstimationTask("mse",method=CV(nReps=2,nFolds=5))
   )
 
 ## Get the workflow corresponding to the ID svm.v2

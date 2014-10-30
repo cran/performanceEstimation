@@ -13,7 +13,7 @@ Obtain the best scores from a performance estimation experiment
 }
 \usage{
 topPerformers(compRes,
-           maxs=rep(FALSE,dim(compRes@tasks[[1]][[1]]@iterationsScores)[2]),
+           maxs=rep(FALSE,dim(compRes[[1]][[1]]@iterationsScores)[2]),
            digs=3)
 }
 %- maybe also 'usage' for other objects documented here.
@@ -22,7 +22,7 @@ topPerformers(compRes,
     A \code{\linkS4class{ComparisonResults}} object with the results of your experimental comparison.
 }
   \item{maxs}{
-    A vector of booleans with as many elements are there are statistics measured in
+    A vector of booleans with as many elements are there are metrics estimated in
     the experimental comparison. A \code{TRUE} value means the respective
     statistic is to be maximized, while a \code{FALSE} means
     minimization. Defaults to all \code{FALSE} values, i.e. all metrics are to
@@ -52,12 +52,15 @@ topPerformers(compRes,
   statistic (2nd column).
 }
 \author{ Luis Torgo \email{ltorgo@dcc.fc.up.pt} }
-\references{ Torgo, L. (2013) \emph{An Infra-Structure for Performance
-    Estimation and Experimental Comparison on Predictive Models}.
-  \url{https://github.com/ltorgo/performanceEstimation}  
+\references{ Torgo, L. (2014) \emph{An Infra-Structure for Performance
+    Estimation and Experimental Comparison of Predictive Models in R}. arXiv:1412.0436 [cs.MS]
+  \url{http://arxiv.org/abs/1412.0436}  
 }
 \seealso{
-\code{\link{performanceEstimation}}, \code{\link{rankWorkflows}}, \code{\link{metricsSummary}}
+  \code{\link{performanceEstimation}},
+  \code{\link{topPerformer}},
+  \code{\link{rankWorkflows}},
+  \code{\link{metricsSummary}}
 }
 \examples{
 \dontrun{
@@ -73,12 +76,11 @@ library(e1071)
 results <- performanceEstimation(
                c(PredTask(Infant.Mortality ~ ., swiss),
                  PredTask(mpg ~ ., mtcars)),
-               c(workflowVariants('standardWF',
-                                  learner='svm',
+               c(workflowVariants(learner='svm',
                                   learner.pars=list(cost=c(1,5),gamma=c(0.1,0.01))
                                  )
                ),
-               CvSettings(2,5,1234)
+               EstimationTask(metrics=c("mse","mae"),method=CV(nReps=2,nFolds=5))
                                  )
 ## get the top performers for each task and evaluation metric
 topPerformers(results)

@@ -13,10 +13,10 @@ Performance estimation using cross validation
   function that the user provides as the solution to the task can
   implement or call whatever modeling technique the user wants.
 
-  The function implements k-fold cross validation (CV)
+  The function implements N x K-fold cross validation (CV)
 estimation. Different settings concerning this methodology are available
-through the argument \code{sets} (check the help page of
-\code{\linkS4class{CvSettings}}).
+through the argument \code{estTask} (check the help page of
+\code{\linkS4class{EstimationTask}} and \code{\linkS4class{CV}}).
 
 Please note that most of the times you will not call this function
 directly (though there is nothing wrong in doing it) but instead you
@@ -28,22 +28,32 @@ you may prefer to use this function directly.
 }
 
 \usage{
-cvEstimates(wf,task,sets)
+cvEstimates(wf,task,estTask,cluster)
 }
 
 \arguments{
   \item{wf}{
- an object of the class \code{Workflow} representing the
-  modeling approach to be evaluated on a certain task.
-}
+    an object of the class \code{\linkS4class{Workflow}} representing the
+    modeling approach to be evaluated on a certain task.
+  }
   \item{task}{
- an object of the class \code{PredTask} defining the
-  prediction task for which we want estimates.
-}
-  \item{sets}{
-an object of the class \code{CvSettings} indicating the
-  cross validation settings to use.
-}
+    an object of the class \code{\linkS4class{PredTask}} defining the
+    prediction task for which we want estimates.
+  }
+  \item{estTask}{
+    an object of the class \code{\linkS4class{EstimationTask}} indicating the metrics to
+    be estimated and the cross validation settings to use.
+  }
+  \item{cluster}{
+    an optional parameter that can either be \code{TRUE} or a
+    \code{\link{cluster}}. In case of \code{TRUE} the function will run in
+    parallel and will internally setup the parallel back-end (defaulting
+    to using half of the cores in your local machine). You may also setup
+    outside your parallel back-end (c.f. \code{\link{makeCluster}}) and
+    then pass the resulting \code{cluster} object to this function using
+    this parameter. In case no value is provided for this parameter the
+    function will run sequentially.
+  }
 }
 
 \details{
@@ -63,44 +73,34 @@ an object of the class \code{CvSettings} indicating the
   partitions aside as test set. In the end the average of the k scores
   obtained on each iteration is the cross validation estimate.
 
-  It is the user responsibility to decide which statistics are to be
-  evaluated on each iteration and how they are calculated. This is done
-  by creating a function that the user knows it will be called by this
-  cross validation routine at each iteration of the cross validation
-  process. This user-defined workflow function must assume that it will
-  receive in the first 3 arguments a formula, a training set and a
-  testing set, respectively. It should also assume that it may receive
-  any other set of parameters that should be passed towards the
-  modelling algorithm. The result of this user-defined function should
-  be an object of class \code{\linkS4class{WFoutput}}. See the Examples
-  section below for an example of these functions. Further examples are
-  given in the package vignette. 
-
-  To facilitate the task of creating these user-defined workflow
-  functions we provide the \code{\link{standardWF}} function that can be used
-  as a kind of skeleton of a general purpose workflow for predictive
-  tasks where the user simply indicates a few small details (e.g. the
-  learning algorithm to use). Check the help page of this function for
-  more details and examples. In the Examples section of the current
-  function you will also find some illustrations of the use of this
-  function.
-  
+  Parallel execution of the estimation experiment is only recommended
+  for minimally large data sets otherwise you may actually increase the
+  computation time due to communication costs between the processes.
 }
 
 \value{
   The result of the function is an object of class \code{\linkS4class{EstimationResults}}.
 }
 
-\references{ Torgo, L. (2013) \emph{An Infra-Structure for Performance
-    Estimation and Experimental Comparison of Predictive Models}.
-  \url{https://github.com/ltorgo/performanceEstimation}  
+\references{ Torgo, L. (2014) \emph{An Infra-Structure for Performance
+    Estimation and Experimental Comparison of Predictive Models in R}. arXiv:1412.0436 [cs.MS]
+  \url{http://arxiv.org/abs/1412.0436}  
 }
 
 \author{ Luis Torgo \email{ltorgo@dcc.fc.up.pt} }
 
 \seealso{
-\code{\link{performanceEstimation}},
-\code{\linkS4class{EstimationResults}},\code{\linkS4class{BootSettings}}, \code{\link{mcEstimates}}, \code{\link{hldEstimates}}, \code{\link{loocvEstimates}}, \code{\link{bootEstimates}}
+  \code{\linkS4class{CV}},
+  \code{\linkS4class{Workflow}},
+  \code{\link{standardWF}},
+  \code{\linkS4class{PredTask}},
+  \code{\linkS4class{EstimationTask}},
+  \code{\link{performanceEstimation}},
+  \code{\link{hldEstimates}},
+  \code{\link{bootEstimates}},  
+  \code{\link{loocvEstimates}},
+  \code{\link{mcEstimates}},
+  \code{\linkS4class{EstimationResults}}
 }
 
 \examples{
@@ -113,11 +113,12 @@ data(swiss)
 
 ## Now the evaluation
 eval.res <- cvEstimates(
-             Workflow("standardWF", wfID="mySVMtrial",
+             Workflow(wf="standardWF", wfID="mySVMtrial",
                       learner="svm", learner.pars=list(cost=10,gamma=0.1)
                      ),
              PredTask(Infant.Mortality ~ ., swiss),
-             CvSettings(2,10,1234))
+             EstimationTask(metrics="mse",method=CV(nReps=2,nFolds=10))
+                       )
 
 ## Check a summary of the results
 summary(eval.res)
@@ -126,7 +127,7 @@ summary(eval.res)
 ## An example with a user-defined workflow function implementing a
 ## simple approach using linear regression models but also containing
 ## some data-preprocessing and well as results post-processing.
-myLM <- function(form,train,test,k=10,.outPreds=T,.outModel=F) {
+myLM <- function(form,train,test,k=10,.outModel=FALSE) {
     require(DMwR)
     ## fill-in NAs on both the train and test sets
     ntr <- knnImputation(train,k)
@@ -139,12 +140,8 @@ myLM <- function(form,train,test,k=10,.outPreds=T,.outModel=F) {
     ## post-process the predictions (this is an example assuming the target
     ## variable is always positive so we change negative predictions into 0)
     p <- ifelse(p < 0,0,p)
-    ## now get the evaluation metrics
-    sts <- regressionMetrics(responseValues(form,test),p,stats=c("mse","mae"))
-    ## creating the return object
-    res <- WFoutput(sts)
-    if (.outPreds)
-      workflowPredictions(res) <- list(responseValues(form,test),p,rownames(test))
+    ## now get the final return object
+    res <- WFoutput(rownames(nts),responseValues(form,nts),p)
     if (.outModel)
       workflowInformation(res) <- list(model=m) 
     res
@@ -153,12 +150,29 @@ myLM <- function(form,train,test,k=10,.outPreds=T,.outModel=F) {
 ## Now for the CV estimation 
 data(algae,package="DMwR")
 eval.res2 <- cvEstimates(
-             Workflow("myLM",k=5),
+             Workflow(wf="myLM",k=5),
              PredTask(a1 ~ ., algae[,1:12],"alga1"),
-             CvSettings(1,10,1234))
+             EstimationTask("mse",method=CV()))
 
 ## Check a summary of the results
 summary(eval.res2)
+
+##
+## Parallel execution example
+##
+## Comparing the time of sequential and parallel execution
+## using half of the cores of the local machine
+##
+data(Satellite,package="mlbench")
+library(e1071)
+system.time({p <- cvEstimates(Workflow(learner="svm"),
+                              PredTask(classes ~ .,Satellite),
+                              EstimationTask("err",Boot(nReps=10)),
+                              cluster=TRUE)})[3]
+system.time({np <- cvEstimates(Workflow(learner="svm"),
+                               PredTask(classes ~ .,Satellite),
+                               EstimationTask("err",Boot(nReps=10)))})[3]
+
 }
 }
 % Add one or more standard keywords, see file 'KEYWORDS' in the

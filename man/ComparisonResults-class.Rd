@@ -14,23 +14,19 @@
   workflows being applied and compared to several predictive tasks. For
   each workflow and task, a set of predictive performance metrics are
   estimated using some methodology and the results of this process are
-  store on this class of objets. }
+  stored in these objets. }
 \section{Objects from the Class}{
-  Objects can be created by calls of the form \code{ComparisonResults(...)}
-  providing the values for the class slots. These object are essentially
+  Objects can be created by calls of the form
+  \code{ComparisonResults(...)}. These object are essentially
   a list of lists of objects of class
-  \code{\linkS4class{EstimationResults}}. The top level list has as many
-  components as there are tasks. For each task there will be a sub-list
-  containing as many components as there are alternative workflows. Each
+  \code{\linkS4class{EstimationResults}}. The top level is named list
+  with has as many components as there are tasks. For each task there
+  will be a named sub-list containing as many components as there are alternative workflows. Each
   of these components will contain and object of class
   \code{\linkS4class{EstimationResults}} with the estimation results for
   the particular workflow / task combination.
 }
-\section{Slots}{
-  \describe{
-    \item{\code{tasks}:}{Object of class \code{list}. }
-  }
-}
+
 \section{Methods}{
   \describe{
     \item{plot}{\code{signature(x = "ComparisonResults", y = "missing")}: plots
@@ -41,19 +37,24 @@
     \item{subset}{\code{signature(x = "ComparisonResults")}: can be used to obtain
     a smaller ComparisonResults object containing only a subset of the information
   of the provided object. This method also accepts the arguments "tasks",
-  "workflows" and "statistics". All are vectors of numbers or names
+  "workflows" and "metrics". All are vectors of numbers or names
   that can be used to subset the original object. They default to all values of each dimension. See "methods?subset" for further details.}
     \item{summary}{\code{signature(object = "ComparisonResults")}: provides a
       summary of the performance estimation experiment. }
 	 }
 }
-\references{ Torgo, L. (2013) \emph{An Infra-Structure for Performance
-    Estimation and Experimental Comparison on Predictive Models}.
-  \url{https://github.com/ltorgo/performanceEstimation}  
+\references{ Torgo, L. (2014) \emph{An Infra-Structure for Performance
+    Estimation and Experimental Comparison of Predictive Models in R}. arXiv:1412.0436 [cs.MS]
+  \url{http://arxiv.org/abs/1412.0436}  
 }
 \author{ Luis Torgo \email{ltorgo@dcc.fc.up.pt} }
 \seealso{
-  \code{\link{performanceEstimation}}, \code{\link{pairedComparisons}}, \code{\link{rankWorkflows}}, \code{\link{topPerformers}}, \code{\link{metricsSummary}}, \code{\link{mergeEstimationRes}}  
+  \code{\link{performanceEstimation}},
+  \code{\link{pairedComparisons}},
+  \code{\link{rankWorkflows}},
+  \code{\link{topPerformers}},
+  \code{\link{metricsSummary}},
+  \code{\link{mergeEstimationRes}}  
 }
 \examples{
 showClass("ComparisonResults")
@@ -69,12 +70,12 @@ data(mtcars)
 ## running the estimation experiment
 res <- performanceEstimation(
   c(PredTask(Infant.Mortality ~ .,swiss),PredTask(mpg ~ ., mtcars)),
-  c(workflowVariants("standardWF",learner="svm",
+  c(workflowVariants(learner="svm",
                      learner.pars=list(cost=c(1,10),gamma=c(0.01,0.5))),
-    workflowVariants("standardWF",learner="rpartXse",
+    workflowVariants(learner="rpartXse",
                      learner.pars=list(se=c(0,0.5,1)))
   ),
-  CvSettings(nReps=1,nFolds=10,seed=1234)
+  EstimationTask(metrics=c("mae","mse","rmse","mape"),method=CV())
   )
 
 ## Check a summary of the results
@@ -82,6 +83,9 @@ summary(res)
 
 topPerformers(res)
 
+summary(subset(res,metrics="mse"))
+summary(subset(res,metrics="mse",partial=FALSE))
+summary(subset(res,workflows="v1"))
 }
 
 }

@@ -11,31 +11,43 @@
 \description{
   Objects of the class \code{WFoutput} store the result of runing a
   workflow on a predictive task. These results, in the context of our
-  performance estimation framework, are formed by at least the scores
-  of a set of evaluation metrics resulting from applying the workflow and also
-  some other optional information. Namely, they may also contain a
-  matrix with the true and predicted values for each test case, and also
-  a list with any other information the creator of the workflow deems
-  important to return (e.g. the model obtained with the training set).
+  performance estimation framework, are formed by information on the
+  predictions of the workflow and some extra information that the
+  workflow author may have decided to return.
 }
 
 \section{Objects from the Class}{
-  Objects can be created by calls of the form \code{WFoutput( ...)}
-  providing the values for the class slots.  
+  Objects can be created by calls of the form \code{WFoutput(
+  ...)}. This constructor accepts in the first argument the row ids of
+  the test cases, in the second the true values of the target variable
+  of these test cases, and in the third argument the predictions of the
+  workflow for these test cases. Note that these predictions may
+  eventually be a data frame or matrix, which is the case of probabilistic
+  classifiers that obtain probabilities of each class for each test
+  case. In this situations the constructor will automatically calculate
+  (and include in the resulting object) an extra column with the label
+  of the class with highest probability. Optionally, in the fourth argument you
+  may include a list with any extra information you wish to return from
+  the workflow.  This later information is often set using the
+   function \code{\link{workflowInformation}}.
 }
 
 \section{Slots}{
   \describe{
-    \item{\code{scores}:}{A named vector with the scores of the metrics
-  being estimated.}
-    \item{\code{predictions}:}{A matrix with two columns, the first with
+    \item{\code{predictions}:}{A \code{data.frame} with at least two columns, the first with
   the true values of the target variable of all  test cases and the
-  second with the predicted values for these cases. This slot is
-  optional and defaults to an empty matrix.}
-    \item{\code{extraInfo}:}{An optional list (defaulting to the empty
-  list) containing any other information the creator of the workflow
-  deems as important to return (e.g. the model obtained with the
-  training data).}
+  second with the predicted values for these cases. In case of
+  probabilistic classifiers it may also contain as many further columns
+  as there are class labels, each with the probability of the respective
+  class label for the test case in the respective row. The row names of
+  this data.frame are the test cases IDs.}
+    \item{\code{extraInfo}:}{A list with extra information returned from
+  the execution of the workflow. This is controled by the workflow
+  function. The standard workflow will at least return a component named
+  \code{times} with the train, test and total times of executing the
+  workflow. Setting \code{.fullOutput=TRUE} when creating the workflow
+  will generate several other components with information from the
+  different steps of the standard workflow.}
   }
 }
 \section{Methods}{
@@ -47,17 +59,35 @@
     obtain a summary of the contents of a \code{WFoutput} object. }
     }
 }
-\references{ Torgo, L. (2013) \emph{An Infra-Structure for Performance
-    Estimation and Experimental Comparison on Predictive Models}.
-  \url{https://github.com/ltorgo/performanceEstimation}  
+\references{ Torgo, L. (2014) \emph{An Infra-Structure for Performance
+    Estimation and Experimental Comparison of Predictive Models in R}. arXiv:1412.0436 [cs.MS]
+  \url{http://arxiv.org/abs/1412.0436}  
 }
 
 \author{ Luis Torgo \email{ltorgo@dcc.fc.up.pt} }
 
-\seealso{\code{\linkS4class{Workflow}},  \code{\link{workflowInformation}},  \code{\link{workflowPredictions}}, \code{\link{runWorkflow}}
+\seealso{
+  \code{\linkS4class{Workflow}},
+  \code{\link{workflowInformation}},
+  \code{\link{workflowPredictions}},
+  \code{\link{runWorkflow}},
+  \code{\link{standardWF}},
+  \code{\link{timeseriesWF}}
 }
 \examples{
 showClass("WFoutput")
 
+## A user-defined workflow returning a WFoutput object
+myWF <- function(form,train,test,wL=0.5,...) {
+    ml <- lm(form,train)
+    mr <- rpart(form,train)
+    pl <- predict(ml,test)
+    pr <- predict(mr,test)
+    ps <- wL*pl+(1-wL)*pr
+    res <- WFoutput(rownames(test),responseValues(form,test),ps)
+    workflowInformation(res) <-
+      list(models=list(lm=ml,tree=mr),indivPreds=list(lm=pl,tree=pr))
+    res
+}
 }
 \keyword{classes}
