@@ -33,7 +33,7 @@
   protocol implies accepting a formula in the first argument, a training
   data frame in the second and a testing data frame in the third, with
   any other arguments being workflow-specific parameters. Moreover, the
-  user-defined workflow must return a \code{\linkS4class{WFoutput}}
+  user-defined workflow must return a \code{list}
   object as result of its execution. See the Examples section for
   illustrations. The constructor can also be given a workflow ID in
   parameter  \code{wfID}. Finally, the constructor also accepts a
@@ -103,7 +103,7 @@ myWF <- function(form,train,test,wL=0.5,...) {
     pl <- predict(ml,test)
     pr <- predict(mr,test)
     ps <- wL*pl+(1-wL)*pr
-    WFoutput(rownames(test),responseValues(form,test),ps)
+    list(trues=responseValues(form,test),preds=ps)
 }
 
 wu <- Workflow(wf="myWF",wL=0.6)

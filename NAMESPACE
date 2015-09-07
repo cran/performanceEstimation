@@ -5,6 +5,9 @@
 import(methods)
 ##import(ggplot2)
 
+importFrom("stats", "IQR", "complete.cases", "df", "median",
+     "model.frame", "model.response", "na.omit", "qtukey",
+     "reshape", "runif", "sd", "t.test", "wilcox.test")
 
 exportClasses(
     CV, Holdout, LOOCV,
@@ -17,8 +20,7 @@ exportClasses(
 
     EstimationTask,
 
-    Workflow,
-    WFoutput
+    Workflow
     )
 
 exportMethods(show)
@@ -40,8 +42,6 @@ export(
 
     Workflow,
     
-    WFoutput,
-
     ## experiments.R file
     performanceEstimation,
 
@@ -66,16 +66,13 @@ export(
     ## resultsManipulation.R file
     mergeEstimationRes,
     taskNames, workflowNames, metricNames,
-    getScores, getIterationInfo, getIterationPreds,
+    getScores, getIterationsInfo, getIterationsPreds,
     estimationSummary,
 
     ## workflows.R file
     workflowVariants,
     getWorkflow,
     runWorkflow,
-    workflowPredictions,
-    'workflowInformation<-',
-    workflowInformation,
     standardWF,
     timeseriesWF,
     standardPRE,

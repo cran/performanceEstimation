@@ -71,22 +71,6 @@ setMethod("summary",
 
 
 
-################################################################
-## WFoutput methods
-################################################################
-
-setMethod("show",
-          "WFoutput",
-          function(object) {
-            cat('WFoutput object :\n')
-            cat("\t'@predictions' slot containing the predictions with dimensions ",nrow(object@predictions),"x",ncol(object@predictions),"\n")
-            if (length(object@extraInfo)) 
-              cat("\t'@extraInfo' slot containing extra information returned by the workflow function.\n")
-            cat("\n")
-          })
-
-
-
 
 
 ################################################################
@@ -208,7 +192,8 @@ setMethod("show",
 setMethod("show",
           "EstimationTask",
           function(object) {
-              cat("Task for estimating ",paste(object@metrics,collapse=",")," using\n")
+              if (is.null(object@metrics)) cat("Task for estimating all metrics of the selected evaluation function using\n")
+              else cat("Task for estimating ",paste(object@metrics,collapse=",")," using\n")
               print(object@method)
           }
          )

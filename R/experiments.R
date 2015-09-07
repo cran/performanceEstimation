@@ -182,10 +182,8 @@ cvEstimates <- function(wf,task,estTask,cluster) {
                               eval(task@dataSource)[permutation[-out.fold],],
                                         #perm.data[out.fold,])
                               eval(task@dataSource)[permutation[out.fold],])
-        
-        list(preds=it.res@predictions,
-             info=it.res@extraInfo,
-             train=permutation[-out.fold])
+
+        c(it.res,list(train=permutation[-out.fold]))
         
     }
     
@@ -296,9 +294,7 @@ hldEstimates <- function(wf,task,estTask,cluster) {
                               eval(task@dataSource)[permutation[-out.fold],],
                               eval(task@dataSource)[permutation[out.fold],])
 
-        list(preds=it.res@predictions,
-             info=it.res@extraInfo,
-             train=permutation[-out.fold])
+        c(it.res,list(train=permutation[-out.fold]))
           
     }
     cat('\n')
@@ -382,9 +378,7 @@ loocvEstimates <- function(wf,task,estTask,verbose=FALSE,cluster) {
                               eval(task@dataSource)[-out.fold,],
                               eval(task@dataSource)[out.fold,])
         
-        list(preds=it.res@predictions,
-             info=it.res@extraInfo,
-             train=(1:n)[-out.fold])
+        c(it.res,list(train=(1:n)[-out.fold]))
     }
     if (verbose && missing(cluster)) cat('\n')
     
@@ -469,17 +463,13 @@ bootEstimates <- function(wf,task,estTask,cluster) {
                                   task@formula,
                                   eval(task@dataSource)[idx,],
                                   eval(task@dataSource)[-idx,])
-            list(preds=it.res@predictions,
-                 info=it.res@extraInfo,
-                 train=idx)
+            c(it.res,list(train=idx))
         } else {
             it.res <- runWorkflow(wf,
                                   task@formula,
                                   eval(task@dataSource)[outFold(estTask@method@dataSplits,r,"train"),],
                                   eval(task@dataSource)[outFold(estTask@method@dataSplits,r),])
-            list(preds=it.res@predictions,
-                 info=it.res@extraInfo,
-                 train=outFold(estTask@method@dataSplits,r,"train"))
+            c(it.res,list(train=outFold(estTask@method@dataSplits,r,"train")))
 
         }
       
@@ -492,52 +482,54 @@ bootEstimates <- function(wf,task,estTask,cluster) {
   
     ## Calculate the metrics estimation
     if (estTask@method@type == ".632") {  # this method is different from all others
-        trReq <- any(estTask@metrics %in% c("nmse","nmae","theil"))
+        trReq <- estTask@trainReq || any(estTask@metrics %in% c("nmse","nmae","theil")) || (is.regression(task) && is.null(estTask@metrics))
+        
         nIts <- length(itsInfo)
-        if (estTask@evaluator=="" ) 
-            if (is.classification(task)) estTask@evaluator <- "classificationMetrics"
-            else                         estTask@evaluator <- "regressionMetrics"
-        scores <- matrix(NA,nrow=nIts,ncol=length(estTask@metrics))
-        colnames(scores) <- estTask@metrics
+        
+        standEval <- if (estTask@evaluator == "" ) TRUE else FALSE
+        if (standEval) 
+            evalFunc <- if (is.classification(task)) "classificationMetrics" else "regressionMetrics"
+        else
+            evalFunc <- estTask@evaluator
+
         wts <- intersect(estTask@metrics,c("trTime","tsTime","totTime"))
         predMs <- setdiff(estTask@metrics,wts)
-        if (length(predMs)) {
-            if (trReq) {
-                resubScores <- do.call(estTask@evaluator,
-                                       c(list(trues=resub@predictions[,"true"],
-                                              preds=resub@predictions[,"predicted"],
-                                              stats=predMs,
-                                              train.y=eval(task@dataSource)[1:n,task@target]),
-                                         estTask@evaluator.pars))
-            } else {
-                resubScores <- do.call(estTask@evaluator,
-                                       c(list(trues=resub@predictions[,"true"],
-                                              preds=resub@predictions[,"predicted"],
-                                              stats=predMs),
-                                         estTask@evaluator.pars))
-            }
+        stats <- if (!is.null(predMs)) list(stats=predMs) else NULL
+
+        ## getting the resubstitution scores
+        trR <- if (trReq) list(train.y=eval(task@dataSource)[1:n,task@target]) else NULL
+        fstArgs <- if (standEval) list(trues=resub$trues,preds=resub$preds) else resub
+        resubScores <- do.call(evalFunc,
+                               c(fstArgs,
+                                 stats,
+                                 trR,
+                                 estTask@evaluator.pars))
+
+        ## The structure holding all scores
+        if (is.null(estTask@metrics)) {
+            ncols <- length(resubScores)
+            namcols <- names(resubScores)
+        } else {
+            ncols <- length(estTask@metrics)
+            namcols <- estTask@metrics
         }
+        scores <- matrix(NA,nrow=nIts,ncol=ncols,
+                         dimnames=list(1:nIts,namcols))
+
         for(i in 1:nIts) {
-            if (length(predMs)) {
-                if (trReq) {
-                    scores[i,predMs] <- 0.632*do.call(estTask@evaluator,
-                                                      c(list(trues=itsInfo[[i]]$preds[,"true"],
-                                                             preds=itsInfo[[i]]$preds[,"predicted"],
-                                                             stats=predMs,
-                                                             train.y=eval(task@dataSource)[itsInfo[[i]]$train,task@target]),
-                                                        estTask@evaluator.pars)) +
-                                                            0.368*resubScores
-                } else {
-                    scores[i,predMs] <- 0.632*do.call(estTask@evaluator,
-                                                      c(list(trues=itsInfo[[i]]$preds[,"true"],
-                                                             preds=itsInfo[[i]]$preds[,"predicted"],
-                                                             stats=predMs),
-                                                        estTask@evaluator.pars)) +
-                                                            0.368*resubScores
-                }
-            }
+            trR <- if (trReq) list(train.y=eval(task@dataSource)[itsInfo[[i]]$train,task@target]) else NULL
+            fstArgs <- if (standEval) list(trues=itsInfo[[i]]$trues,preds=itsInfo[[i]]$preds) else itsInfo[[i]]
+            ss <- 0.632*do.call(evalFunc,
+                                c(fstArgs,
+                                  stats,
+                                  trR,
+                                  estTask@evaluator.pars)
+                                ) + 0.368*resubScores
+            
+            if (is.null(predMs))  scores[i,] <- ss else scores[i,predMs] <- ss
+
             if (length(wts)) {
-                allts <- as.numeric(itsInfo[[i]]$info$times)
+                allts <- as.numeric(itsInfo[[i]]$times)
                 scores[i,wts] <- c(trTime=allts[1],tsTime=allts[2],
                                    totTime=allts[1]+allts[2])[wts]
             }
@@ -641,9 +633,7 @@ mcEstimates <- function(wf, task, estTask, verbose=TRUE, cluster) {
 
         }
 
-        list(preds=rep.res@predictions,
-             info=rep.res@extraInfo,
-             train=(start-train.size):(start-1))
+        c(rep.res,list(train=(start-train.size):(start-1)))
 
     }
     cat('\n')
@@ -717,35 +707,44 @@ outFold <- function(ds,it,what="test") if (is.list(ds[[1]])) ds[[it]][[what]] el
 
 ## calculates the scores of all iterations of an estimation exp
 .scoresIts <- function(task,estTask,its) {
-    trReq <- estTask@trainReq || any(estTask@metrics %in% c("nmse","nmae","theil"))
+    trReq <- estTask@trainReq || any(estTask@metrics %in% c("nmse","nmae","theil")) || (is.regression(task) && is.null(estTask@metrics))
 
     nIts <- length(its)
-    if (estTask@evaluator=="" )  # no user defined evaluation function
-        if (is.classification(task)) estTask@evaluator <- "classificationMetrics"
-        else                         estTask@evaluator <- "regressionMetrics"
-    scores <- matrix(NA,nrow=nIts,ncol=length(estTask@metrics))
-    colnames(scores) <- estTask@metrics
+
+    standEval <- if (estTask@evaluator == "" ) TRUE else FALSE
+    if (standEval) 
+        evalFunc <- if (is.classification(task)) "classificationMetrics" else "regressionMetrics"
+    else
+        evalFunc <- estTask@evaluator
+
+    scores <- NULL
     wts <- intersect(estTask@metrics,c("trTime","tsTime","totTime"))
     predMs <- setdiff(estTask@metrics,wts)
+    stats <- if (!is.null(predMs)) list(stats=predMs) else NULL
+    
     for(i in 1:nIts) {
-        if (length(predMs)) {
-            if (trReq) {  # info on the training data required by evaluator
-                scores[i,predMs] <- do.call(estTask@evaluator,
-                                            c(list(trues=its[[i]]$preds[,"true"],
-                                                   preds=its[[i]]$preds[,"predicted"],
-                                                   stats=predMs,
-                                                   train.y=eval(task@dataSource)[its[[i]]$train,task@target]),
-                                              estTask@evaluator.pars))
+        trR <- if (trReq) list(train.y=eval(task@dataSource)[its[[i]]$train,task@target]) else NULL
+        fstArgs <- if (standEval) list(trues=its[[i]]$trues,preds=its[[i]]$preds) else its[[i]]
+        ss <- do.call(evalFunc,
+                      c(fstArgs,
+                        stats,
+                        trR,
+                        estTask@evaluator.pars))
+        if (is.null(scores)) {
+            if (is.null(estTask@metrics)) {
+                ncols <- length(ss)
+                namcols <- names(ss)
             } else {
-                scores[i,predMs] <- do.call(estTask@evaluator,
-                                            c(list(trues=its[[i]]$preds[,"true"],
-                                                   preds=its[[i]]$preds[,"predicted"],
-                                                   stats=predMs),
-                                              estTask@evaluator.pars))
+                ncols <- length(estTask@metrics)
+                namcols <- estTask@metrics
             }
+            scores <- matrix(NA,nrow=nIts,ncol=ncols,
+                             dimnames=list(1:nIts,namcols))
         }
+        if (is.null(predMs))  scores[i,] <- ss else scores[i,predMs] <- ss
+        
         if (length(wts)) {
-            allts <- as.numeric(its[[i]]$info$times)
+            allts <- as.numeric(its[[i]]$times)
             scores[i,wts] <- c(trTime=allts[1],tsTime=allts[2],totTime=allts[1]+allts[2])[wts]
         }
     }
