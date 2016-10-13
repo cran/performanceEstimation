@@ -13,7 +13,7 @@ metrics may require additional information to be given (see Details section).
 }
 \usage{
 classificationMetrics(trues,preds,
-            stats=NULL,
+            metrics=NULL,
             benMtrx=NULL,
             allCls=unique(c(levels(as.factor(trues)),levels(as.factor(preds)))),
             posClass=allCls[1],
@@ -27,7 +27,7 @@ A vector or factor with the true values of the target variable.
   \item{preds}{
 A  vector or factor with the predicted values of the target variable.
 }
-  \item{stats}{
+  \item{metrics}{
     A vector with the names of the evaluation statistics to
     calculate (see Details section). If none is indicated (default) it will
   calculate all available metrics.
@@ -44,7 +44,8 @@ A  vector or factor with the predicted values of the target variable.
     whilst costs (negative values) should be on all positions outside of
     the diagonal of the matrix (situations where the predicted value is
     different from the true class value and thus the model should incur on
-    a cost for this wrong prediction).
+    a cost for this wrong prediction). The function assumes the rows of the matrix are 
+    the predicted values while the columns are the true class values.
   }
   \item{allCls}{
     An optional vector with the possible values of the nominal target variable,
@@ -77,18 +78,26 @@ A  vector or factor with the predicted values of the target variable.
 In the
   following description of the currently available metrics we denote the
   vector of true target variable values as t, the vector of predictions
-  by p, while N denotes the size of these two vectors, i.e. the number
+  by p, while n denotes the size of these two vectors, i.e. the number
   of test cases. Furthermore we will denote the number of classes
   (different values of the target nominal variable) as C. For problems
   with only two classes, where one is considered the "positive" class we
   will use some extra notation, namely: TP = #{p == + & t == +} ; FP =
   #{p == + & t == -} ; TN = #{p == - & t == -}; FN = #{p == - & t == +}
-  ; P = #{t == +} ; N = #{t == -}
+  ; P = #{t == +} ; N = #{t == -}; Finally, for some descriptions
+  we will use the concept of confusion matrix (CM). This is a C x C
+  square matrix where entry CM[i,j] contains the number of times (for a
+  certain test set) some model predicted class i for a true class value
+  of j, i.e. rows of this matrix represent predicted values and columns
+  true values. We will also refer to cost/benefit matrices (or utility
+  matrices) that have the same structure (squared C x C) where entry
+  CB[i,j] represents the cost/benefit of predicting a class i for a true
+  class of j.
 
   The currently available classification performance metrics
   are:
   
-  "acc": sum(I(t_i == p_i))/N, where I() is an indicator function given 1 if its
+  "acc": sum(I(t_i == p_i))/n, where I() is an indicator function given 1 if its
   argument is true and 0 otherwise. Note that "acc" is a value in the interval [0,1], 1
   corresponding to  all predictions being correct.
 
@@ -101,21 +110,18 @@ In the
   benefits corresponding to correct predictions, i.e. where t_i ==
   p_i, while costs correspond to erroneous predictions. These matrices are C x C square matrices, where C is the
   number of possible values of the nominal target variable (i.e. the
-  number of classes). The diagonal of these matrices corresponds to the
+  number of classes). The entry benMtrx[x, y] represents the utility (a cost if x != y) of the model predicting x for a true value of y. The diagonal of these matrices corresponds to the
   correct predictions (t_i == p_i) and should have positive values
   (benefits). The positions outside of the diagonal correspond to
   prediction errors and should have negative values (costs). The "totU"
   measures the total Utility (sum of the costs and benefits) of the
   predictions of a classification model. It is calculated as
-  sum(CB[t_i,p_i] * CM[t_i,p_i) where CB is a cost/benefit matrix and CB[t_i,p_i] 
-  is the entry on this matrix corresponding to predicting class p_i for
-  a true value of t_i, and CM is a confusion matrix where CM[t_i,p_i] is
-  the number of times the true class value was t_i and the prediction of
-  the model was p_i
+  sum(CB[p_i,t_j] * CM[p_i,t_j) where CB is a cost/benefit matrix and CM
+  is a confusion matrix. 
 
   "fpr": false positives rate, is a metric applicable to two classes
   tasks that measures the proportion of times the model
-  forecasted a positive class when it should not and it is given by FP/P
+  forecasted a positive class when it should not and it is given by FP/N
 
   "fnr": false negatives rate, is a metric applicable to two classes
   tasks that measures the proportion of times the model
@@ -134,16 +140,33 @@ In the
 
   "sens": sensitivity, it is equal to the true positive rate ("tpr")
 
-  "spec": specificity, it is a metric  applicable to two classes
-  tasks that measures the proportion of times the model
-  forecasted a negative class for the negative test cases, and it is
-  given by TN/N
+  "spec": specificity, it is equal to the true negative rate ("tnr")
 
   "prec": precision, it is a metric  applicable to two classes
   tasks that measures the proportion of times the model
   forecasted a positive class and it was correct, and it is
   given by TP/(TP+FP)
 
+  "ppv": predicted positive value, it is equal to the precision ("prec")
+
+  "fdr": false discovery rate, it is a metric  applicable to two classes
+  tasks that is given by FP/(TP+FP)
+
+  "npv": negative predicted value, it is a metric  applicable to two classes
+  tasks that is given by TN/(TN+FN)
+
+  "for": false omission rate, it is a metric  applicable to two classes
+  tasks that is given by FN/(TN+FN)
+
+  "plr": positive likelihood ratio, it is a metric  applicable to two classes
+  tasks that is given by "tpr"/"fpr"
+  
+  "nlr": negative likelihood ratio, it is a metric  applicable to two classes
+  tasks that is given by "fnr"/"tnr"
+  
+  "dor": diagnostic odds ratio, it is a metric  applicable to two classes
+  tasks that is given by "plr"/"nlr"
+  
   "rpp": rate of positive predictions, it is a metric  applicable to two classes
   tasks that measures the proportion of times the model
   forecasted a positive class, and it is

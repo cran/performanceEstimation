@@ -69,7 +69,7 @@ performanceEstimation <- function(tasks,workflows,estTask,...) {
 
                c(list(workflows[[s]],
                     tasks[[d]],
-                    estTask),...)
+                    estTask),list(...))
                          )
     }
     
@@ -106,18 +106,20 @@ performanceEstimation <- function(tasks,workflows,estTask,...) {
 ##                      CvTask(1,10,1234))
 ##
 cvEstimates <- function(wf,task,estTask,cluster) {
-    ## the function to use on the loop (either sequential or parallel)
-    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
 
     ## registering (and eventually creating) the parallel backend
-    if (!missing(cluster)) {
-        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+    if (!missing(cluster) && !is.null(cluster) && getOption("parallelMap.status")=="stopped") {
+        if (is(cluster,"list")) do.call(parallelMap::parallelStart,cluster)
         else {
-            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
-            doParallel::registerDoParallel(cl)
-            on.exit(parallel::stopCluster(cl))
+            cores <- parallel::detectCores()-1
+            mode <- if(.Platform$OS.type != "windows") { "multicore" } else { "socket" }
+            parallelMap::parallelStart(mode=mode,cpus=cores,show.info=FALSE)
+            on.exit(parallelMap::parallelStop())
         }
-        cat(sprintf('cvEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+        parallelMap::parallelLibrary(packages=.packages())
+        cat('cvEstimates: Running in parallel with options:\n')
+        print(parallelMap::parallelGetOptions())
+        cat('\n\n')
     }
             
         
@@ -151,42 +153,42 @@ cvEstimates <- function(wf,task,estTask,cluster) {
 
     permutation <- 1:n
     it <- NULL  # dummy assignment due to Note on cran-check
-    if (missing(cluster)) cat("Iteration :")
-    itsInfo <- foreach::foreach(it=1:nits,
-                                .packages=.loadedPackages(),
-                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
-                                ) %fun%  {
-        
-        if (missing(cluster)) cat(" ",it)
-        nfold <- (it - 1) %% estTask@method@nFolds + 1
-        nrep <- (it - 1) %/% estTask@method@nFolds + 1
-        
-        if (!userSplit) {
-            set.seed(estTask@method@seed*nrep)
-            permutation <- sample(n)
-        }
-        
-        if (!userSplit) {
-            if (estTask@method@strat) {
-                out.fold <- c()
-                for(x in seq(along=levels(b))) 
-                    if (bct[x]) out.fold <- c(out.fold,which(b[permutation] == levels(b)[x])[((nfold-1)*bct[x]+1):((nfold-1)*bct[x]+bct[x])])
-            } else {
-                out.fold <- ((nfold-1)*n.each.part+1):(nfold*n.each.part)
-            }
-        } else out.fold <- outFold(estTask@method@dataSplits,it)
-        
-        it.res <- runWorkflow(wf,
-                              task@formula,
-                                        #perm.data[-out.fold,],
-                              eval(task@dataSource)[permutation[-out.fold],],
-                                        #perm.data[out.fold,])
-                              eval(task@dataSource)[permutation[out.fold],])
+    cat("Iteration :")
 
-        c(it.res,list(train=permutation[-out.fold]))
-        
-    }
+    itsInfo <- parallelMap::parallelMap(
+        function(it) {
+            cat("*")
+            nfold <- (it - 1) %% estTask@method@nFolds + 1
+            nrep <- (it - 1) %/% estTask@method@nFolds + 1
+            
+            if (!userSplit) {
+                set.seed(estTask@method@seed*nrep)
+                permutation <- sample(n)
+            }
+            
+            if (!userSplit) {
+                if (estTask@method@strat) {
+                    out.fold <- c()
+                    for(x in seq(along=levels(b))) 
+                        if (bct[x]) out.fold <- c(out.fold,which(b[permutation] == levels(b)[x])[((nfold-1)*bct[x]+1):((nfold-1)*bct[x]+bct[x])])
+                } else {
+                    out.fold <- ((nfold-1)*n.each.part+1):(nfold*n.each.part)
+                }
+            } else out.fold <- outFold(estTask@method@dataSplits,it)
+            
+            it.res <- runWorkflow(wf,
+                                  task@formula,
+                                        #perm.data[-out.fold,],
+                                  eval(task@dataSource)[permutation[-out.fold],],
+                                        #perm.data[out.fold,])
+                                  eval(task@dataSource)[permutation[out.fold],])
+            
+            c(it.res,list(train=permutation[-out.fold]))
+            
+        },
+        1:nits)
     
+    cat("\n")
     ## randomize the number generator to avoid undesired
     ## problems caused by inner set.seed()'s
     set.seed(prod(as.integer(unlist(strsplit(strsplit(date()," ")[[1]][4],":")))))
@@ -222,19 +224,21 @@ cvEstimates <- function(wf,task,estTask,cluster) {
 #              hldTask(4,0.25,1234))
 #
 hldEstimates <- function(wf,task,estTask,cluster) {
-    ## the function to use on the loop (either sequential or parallel)
-    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
-
     ## registering (and eventually creating) the parallel backend
-    if (!missing(cluster)) {
-        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+    if (!missing(cluster) && !is.null(cluster) && getOption("parallelMap.status")=="stopped") {
+        if (is(cluster,"list")) do.call(parallelMap::parallelStart,cluster)
         else {
-            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
-            doParallel::registerDoParallel(cl)
-            on.exit(parallel::stopCluster(cl))
+            cores <- parallel::detectCores()-1
+            mode <- if(.Platform$OS.type != "windows") { "multicore" } else { "socket" }
+            parallelMap::parallelStart(mode=mode,cpus=cores,show.info=FALSE)
+            on.exit(parallelMap::parallelStop())
         }
-        cat(sprintf('hldEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+        parallelMap::parallelLibrary(packages=.packages())
+        cat('hldEstimates: Running in parallel with options:\n')
+        print(parallelMap::parallelGetOptions())
+        cat('\n\n')
     }
+
 
     show(estTask)
 
@@ -264,39 +268,37 @@ hldEstimates <- function(wf,task,estTask,cluster) {
     permutation <- 1:n
 
     r <- NULL  # dummy assignment due to Note on cran-check
-    if (missing(cluster)) cat("Iteration :")
-    itsInfo <- foreach::foreach(r=1:estTask@method@nReps,
-                                .packages=.loadedPackages(),
-                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
-                                ) %fun%  {
+    cat("Iteration :")
+    itsInfo <- parallelMap::parallelMap(
+        function(r) {
+            cat(' ',r)
 
+            if (!userSplit) {
+                set.seed(estTask@method@seed*r)
+                permutation <- sample(n)
+            } 
+            
+            
+            if (!userSplit) {
+                if (estTask@method@strat) {
+                    out.fold <- c()
+                    for(x in seq(along=levels(b))) 
+                        if (bct[x]) out.fold <- c(out.fold,which(b[permutation] == levels(b)[x])[1:bct[x]])
+                } else {
+                    out.fold <- 1:n.test
+                }
+            } else out.fold <- outFold(estTask@method@dataSplits,r)
+            
+            it.res <- runWorkflow(wf,
+                                  task@formula,
+                                  eval(task@dataSource)[permutation[-out.fold],],
+                                  eval(task@dataSource)[permutation[out.fold],])
+            
+            c(it.res,list(train=permutation[-out.fold]))
+        },
+        1:estTask@method@nReps
+    )
 
-        if (missing(cluster)) cat(' ',r)
-
-        if (!userSplit) {
-            set.seed(estTask@method@seed*r)
-            permutation <- sample(n)
-        } 
-
-
-        if (!userSplit) {
-            if (estTask@method@strat) {
-                out.fold <- c()
-                for(x in seq(along=levels(b))) 
-                    if (bct[x]) out.fold <- c(out.fold,which(b[permutation] == levels(b)[x])[1:bct[x]])
-            } else {
-                out.fold <- 1:n.test
-            }
-        } else out.fold <- outFold(estTask@method@dataSplits,r)
-
-        it.res <- runWorkflow(wf,
-                              task@formula,
-                              eval(task@dataSource)[permutation[-out.fold],],
-                              eval(task@dataSource)[permutation[out.fold],])
-
-        c(it.res,list(train=permutation[-out.fold]))
-          
-    }
     cat('\n')
   
     ## randomize the number generator to avoid undesired
@@ -336,19 +338,21 @@ hldEstimates <- function(wf,task,estTask,cluster) {
 #            dataset(medv~.,Boston))
 #
 loocvEstimates <- function(wf,task,estTask,verbose=FALSE,cluster) {
-    ## the function to use on the loop (either sequential or parallel)
-    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
-
     ## registering (and eventually creating) the parallel backend
-    if (!missing(cluster)) {
-        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+    if (!missing(cluster) && !is.null(cluster) && getOption("parallelMap.status")=="stopped") {
+        if (is(cluster,"list")) do.call(parallelMap::parallelStart,cluster)
         else {
-            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
-            doParallel::registerDoParallel(cl)
-            on.exit(parallel::stopCluster(cl))
+            cores <- parallel::detectCores()-1
+            mode <- if(.Platform$OS.type != "windows") { "multicore" } else { "socket" }
+            parallelMap::parallelStart(mode=mode,cpus=cores,show.info=FALSE)
+            on.exit(parallelMap::parallelStop())
         }
-        cat(sprintf('loocvEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+        parallelMap::parallelLibrary(packages=.packages())
+        cat('loocvEstimates: Running in parallel with options:\n')
+        print(parallelMap::parallelGetOptions())
+        cat('\n\n')
     }
+            
 
     show(estTask)
 
@@ -360,27 +364,28 @@ loocvEstimates <- function(wf,task,estTask,verbose=FALSE,cluster) {
     itsInfo <- vector("list",n)
 
     r <- NULL  # dummy assignment due to Note on cran-check
-    if (verbose && missing(cluster)) cat("Iteration :")
-    itsInfo <- foreach::foreach(r=1:n,
-                                .packages=.loadedPackages(),
-                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
-                                ) %fun%  {
+    if (verbose) cat("Iteration :")
 
-        if (verbose && missing(cluster)) cat('*')
+    itsInfo <- parallelMap::parallelMap(
+        function(r) {
+            if (verbose) cat('*')
 
-        if (!userSplit) {
-            set.seed(estTask@method@seed*r)
-            out.fold <- r
-        } else out.fold <- outFold(estTask@method@dataSplits,r)
-
-        it.res <- runWorkflow(wf,
-                              task@formula,
-                              eval(task@dataSource)[-out.fold,],
-                              eval(task@dataSource)[out.fold,])
-        
-        c(it.res,list(train=(1:n)[-out.fold]))
-    }
-    if (verbose && missing(cluster)) cat('\n')
+            if (!userSplit) {
+                set.seed(estTask@method@seed*r)
+                out.fold <- r
+            } else out.fold <- outFold(estTask@method@dataSplits,r)
+            
+            it.res <- runWorkflow(wf,
+                                  task@formula,
+                                  eval(task@dataSource)[-out.fold,],
+                                  eval(task@dataSource)[out.fold,])
+            
+            c(it.res,list(train=(1:n)[-out.fold]))
+        },
+        1:n
+    )
+    
+    if (verbose) cat('\n')
     
     ## randomize the number generator to avoid undesired
     ## problems caused by inner set.seed()'s
@@ -420,18 +425,19 @@ loocvEstimates <- function(wf,task,estTask,verbose=FALSE,cluster) {
 #                      bootTask(1234,10))
 #
 bootEstimates <- function(wf,task,estTask,cluster) {
-    ## the function to use on the loop (either sequential or parallel)
-    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
-
     ## registering (and eventually creating) the parallel backend
-    if (!missing(cluster)) {
-        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+    if (!missing(cluster) && !is.null(cluster) && getOption("parallelMap.status")=="stopped") {
+        if (is(cluster,"list")) do.call(parallelMap::parallelStart,cluster)
         else {
-            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
-            doParallel::registerDoParallel(cl)
-            on.exit(parallel::stopCluster(cl))
+            cores <- parallel::detectCores()-1
+            mode <- if(.Platform$OS.type != "windows") { "multicore" } else { "socket" }
+            parallelMap::parallelStart(mode=mode,cpus=cores,show.info=FALSE)
+            on.exit(parallelMap::parallelStop())
         }
-        cat(sprintf('bootEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+        parallelMap::parallelLibrary(packages=.packages())
+        cat('bootEstimates: Running in parallel with options:\n')
+        print(parallelMap::parallelGetOptions())
+        cat('\n\n')
     }
 
     show(estTask)
@@ -447,33 +453,33 @@ bootEstimates <- function(wf,task,estTask,cluster) {
     itsInfo <- vector("list",estTask@method@nReps)
 
     r <- NULL  # dummy assignment due to Note on cran-check
-    if (missing(cluster)) cat("Iteration :")
-    itsInfo <- foreach::foreach(r=1:estTask@method@nReps,
-                                .packages=.loadedPackages(),
-                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
-                                ) %fun%  {
+    cat("Iteration :")
 
+    itsInfo <- parallelMap::parallelMap(
+        function(r) {
+            cat(' ',r)
+            
+            if (!userSplit) {
+                set.seed(estTask@method@seed*r)
+                idx <- sample(n,n,replace=T)
+                it.res <- runWorkflow(wf,
+                                      task@formula,
+                                      eval(task@dataSource)[idx,],
+                                      eval(task@dataSource)[-idx,])
+                c(it.res,list(train=idx))
+            } else {
+                it.res <- runWorkflow(wf,
+                                      task@formula,
+                                      eval(task@dataSource)[outFold(estTask@method@dataSplits,r,"train"),],
+                                      eval(task@dataSource)[outFold(estTask@method@dataSplits,r),])
+                c(it.res,list(train=outFold(estTask@method@dataSplits,r,"train")))
+                
+            }
+        },
+        1:estTask@method@nReps
+    )
+    
 
-        if (missing(cluster)) cat(' ',r)
-
-        if (!userSplit) {
-            set.seed(estTask@method@seed*r)
-            idx <- sample(n,n,replace=T)
-            it.res <- runWorkflow(wf,
-                                  task@formula,
-                                  eval(task@dataSource)[idx,],
-                                  eval(task@dataSource)[-idx,])
-            c(it.res,list(train=idx))
-        } else {
-            it.res <- runWorkflow(wf,
-                                  task@formula,
-                                  eval(task@dataSource)[outFold(estTask@method@dataSplits,r,"train"),],
-                                  eval(task@dataSource)[outFold(estTask@method@dataSplits,r),])
-            c(it.res,list(train=outFold(estTask@method@dataSplits,r,"train")))
-
-        }
-      
-    }
     cat('\n')
 
     ## randomize the number generator to avoid undesired
@@ -486,7 +492,7 @@ bootEstimates <- function(wf,task,estTask,cluster) {
         
         nIts <- length(itsInfo)
         
-        standEval <- if (estTask@evaluator == "" ) TRUE else FALSE
+        standEval <- if (is.null(estTask@evaluator)) TRUE else FALSE
         if (standEval) 
             evalFunc <- if (is.classification(task)) "classificationMetrics" else "regressionMetrics"
         else
@@ -494,14 +500,14 @@ bootEstimates <- function(wf,task,estTask,cluster) {
 
         wts <- intersect(estTask@metrics,c("trTime","tsTime","totTime"))
         predMs <- setdiff(estTask@metrics,wts)
-        stats <- if (!is.null(predMs)) list(stats=predMs) else NULL
+        metrics <- if (!is.null(predMs)) list(metrics=predMs) else NULL
 
         ## getting the resubstitution scores
         trR <- if (trReq) list(train.y=eval(task@dataSource)[1:n,task@target]) else NULL
         fstArgs <- if (standEval) list(trues=resub$trues,preds=resub$preds) else resub
         resubScores <- do.call(evalFunc,
                                c(fstArgs,
-                                 stats,
+                                 metrics,
                                  trR,
                                  estTask@evaluator.pars))
 
@@ -521,7 +527,7 @@ bootEstimates <- function(wf,task,estTask,cluster) {
             fstArgs <- if (standEval) list(trues=itsInfo[[i]]$trues,preds=itsInfo[[i]]$preds) else itsInfo[[i]]
             ss <- 0.632*do.call(evalFunc,
                                 c(fstArgs,
-                                  stats,
+                                  metrics,
                                   trR,
                                   estTask@evaluator.pars)
                                 ) + 0.368*resubScores
@@ -563,20 +569,20 @@ bootEstimates <- function(wf,task,estTask,cluster) {
 ## =====================================================
 ## Luis Torgo, Aug 2009
 ## =====================================================
-
 mcEstimates <- function(wf, task, estTask, verbose=TRUE, cluster) {
-    ## the function to use on the loop (either sequential or parallel)
-    `%fun%` <- if (!missing(cluster)) foreach::`%dopar%` else foreach::`%do%`
-
     ## registering (and eventually creating) the parallel backend
-    if (!missing(cluster)) {
-        if (is(cluster,"cluster")) doParallel::registerDoParallel(cluster)
+    if (!missing(cluster) && !is.null(cluster) && getOption("parallelMap.status")=="stopped") {
+        if (is(cluster,"list")) do.call(parallelMap::parallelStart,cluster)
         else {
-            cl <- parallel::makeCluster(parallel::detectCores()%/%2)
-            doParallel::registerDoParallel(cl)
-            on.exit(parallel::stopCluster(cl))
+            cores <- parallel::detectCores()-1
+            mode <- if(.Platform$OS.type != "windows") { "multicore" } else { "socket" }
+            parallelMap::parallelStart(mode=mode,cpus=cores,show.info=FALSE)
+            on.exit(parallelMap::parallelStop())
         }
-        cat(sprintf('mcEstimates: Running in parallel with %d worker(s)\n', foreach::getDoParWorkers()))
+        parallelMap::parallelLibrary(packages=.packages())
+        cat('mcEstimates: Running in parallel with options:\n')
+        print(parallelMap::parallelGetOptions())
+        cat('\n\n')
     }
 
 
@@ -608,34 +614,31 @@ mcEstimates <- function(wf, task, estTask, verbose=TRUE, cluster) {
     }
 
     it <- NULL  # dummy assignment due to Note on cran-check
-    itsInfo <- foreach::foreach(it=seq(along=starting.points),
-                                .packages=.loadedPackages(),
-                                .export=if (class(task@dataSource) == "data.frame") NULL else c(as.character(task@dataSource))
-                                ) %fun%  {
 
-
-
-        start <- starting.points[it]
-        if (missing(cluster)) cat('Repetition ',it,'\n\t start test = ',
-                                  start,'; test size = ',test.size,'\n')
-
-
-        if (!userSplit) {
-            rep.res <- runWorkflow(wf,
-                                   task@formula,
-                                   eval(task@dataSource)[(start-train.size):(start-1),],
-                                   eval(task@dataSource)[start:(start+test.size-1),])
-        } else {
-            rep.res <- runWorkflow(wf,
-                                   task@formula,
-                                   eval(task@dataSource)[estTask@method@dataSplits[[it]]$train,],
-                                   eval(task@dataSource)[estTask@method@dataSplits[[it]]$test,])
-
-        }
-
-        c(rep.res,list(train=(start-train.size):(start-1)))
-
-    }
+    itsInfo <- parallelMap::parallelMap(
+        function(it) {
+            start <- starting.points[it]
+            cat('Repetition ',it,'\n\t start test = ',
+                start,'; test size = ',test.size,'\n')
+            
+            if (!userSplit) {
+                rep.res <- runWorkflow(wf,
+                                       task@formula,
+                                       eval(task@dataSource)[(start-train.size):(start-1),],
+                                       eval(task@dataSource)[start:(start+test.size-1),])
+            } else {
+                rep.res <- runWorkflow(wf,
+                                       task@formula,
+                                       eval(task@dataSource)[estTask@method@dataSplits[[it]]$train,],
+                                       eval(task@dataSource)[estTask@method@dataSplits[[it]]$test,])
+                
+            }
+            
+            c(rep.res,list(train=(start-train.size):(start-1)))
+        },
+        seq(along=starting.points)
+    )
+    
     cat('\n')
 
     ## randomize the number generator to avoid undesired
@@ -711,7 +714,7 @@ outFold <- function(ds,it,what="test") if (is.list(ds[[1]])) ds[[it]][[what]] el
 
     nIts <- length(its)
 
-    standEval <- if (estTask@evaluator == "" ) TRUE else FALSE
+    standEval <- if (is.null(estTask@evaluator)) TRUE else FALSE
     if (standEval) 
         evalFunc <- if (is.classification(task)) "classificationMetrics" else "regressionMetrics"
     else
@@ -720,14 +723,14 @@ outFold <- function(ds,it,what="test") if (is.list(ds[[1]])) ds[[it]][[what]] el
     scores <- NULL
     wts <- intersect(estTask@metrics,c("trTime","tsTime","totTime"))
     predMs <- setdiff(estTask@metrics,wts)
-    stats <- if (!is.null(predMs)) list(stats=predMs) else NULL
+    metrics <- if (!is.null(predMs)) list(metrics=predMs) else NULL
     
     for(i in 1:nIts) {
-        trR <- if (trReq) list(train.y=eval(task@dataSource)[its[[i]]$train,task@target]) else NULL
+        trR <- if (trReq) list(train.y=eval(task@dataSource)[its[[i]]$train,][[task@target]]) else NULL
         fstArgs <- if (standEval) list(trues=its[[i]]$trues,preds=its[[i]]$preds) else its[[i]]
         ss <- do.call(evalFunc,
                       c(fstArgs,
-                        stats,
+                        metrics,
                         trR,
                         estTask@evaluator.pars))
         if (is.null(scores)) {
@@ -752,4 +755,6 @@ outFold <- function(ds,it,what="test") if (is.list(ds[[1]])) ds[[it]][[what]] el
 }
 
 
-.loadedPackages <- function(bases=c("datasets","grDevices","stats","utils","base","graphics","methods")) setdiff(sapply(strsplit(search()[grep("package",search())],":"),function(x) x[2]),bases)
+## .loadedPackages <- function(bases=c("datasets","grDevices","stats","utils","base","graphics","methods")) setdiff(sapply(strsplit(search()[grep("package",search())],":"),function(x) x[2]),bases)
+## This was replaced by a call to .packages()
+

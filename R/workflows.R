@@ -46,7 +46,7 @@ workflowVariants <- function(wf,...,varsRootName,as.is=NULL) {
     
     if (missing(varsRootName)) varsRootName <- n
 
-    default.novar <- c('evaluator.pars.stats','evaluator.pars.allCls','evaluator.pars.benMtrx')
+    default.novar <- c('evaluator.pars.metrics','evaluator.pars.allCls','evaluator.pars.benMtrx')
     allnovar <- c(as.is,default.novar)
 
     ## unfolding the parameters hidden inside the special parameters
@@ -170,8 +170,9 @@ getWorkflow <- function(var,obj)
 # runWorkflow(l,medv ~ ., Boston)
 #
 runWorkflow <- function(l,...) {
-  if (!inherits(l,'Workflow')) stop(l,' is not of class "Workflow".')
-  do.call(l@func,c(list(...),l@pars))
+    if (!inherits(l,'Workflow')) stop(l,' is not of class "Workflow".')
+  #do.call(l@func,c(list(...),l@pars))
+    do.call(eval(parse(text=l@func)),c(list(...),l@pars))
 }
 
 
@@ -206,20 +207,24 @@ standardWF <- function(form,train,test,
     ## Learning and prediction stage
     tm <- Sys.time()
     if (is.null(predictor)) {  ## there is no separate predict stage (e.g. kNN)
-        ps <- do.call(learner,c(list(form,train,test),learner.pars))
+        #ps <- do.call(learner,c(list(form,train,test),learner.pars))
+        ps <- do.call(eval(parse(text=learner)),c(list(form,train,test),learner.pars))
         t.tr <- t.ts <- as.numeric(Sys.time() - tm,units="secs")
         if (.fullOutput) .fullRes$modeling <- ps
     } else {
-        m <- do.call(learner,c(list(form,train),learner.pars))
+        #m <- do.call(learner,c(list(form,train),learner.pars))
+        ## The following addition of data= was caused by the "wrong" order of parameters of gbm
+        m <- do.call(eval(parse(text=learner)),c(list(form,data=train),learner.pars)) 
         t.tr <- as.numeric(Sys.time() - tm,units="secs")
         tm <- Sys.time()
-        ps <- do.call(predictor,c(list(m,test),predictor.pars))
+        #ps <- do.call(predictor,c(list(m,test),predictor.pars))
+        ps <- do.call(eval(parse(text=predictor)),c(list(m,test),predictor.pars))
         t.ts <- as.numeric(Sys.time() - tm,units="secs")
         if (.fullOutput) .fullRes$modeling <- if (is.null(post)) m else list(model=m,initPreds=ps)
     }
 
     ## Checking for strange things (like regression methods not returning a vector, e.g. earth)
-    if (is.numeric(train[,as.character(form[[2]])]) && !is.null(dim(ps))) ps <- ps[,1]
+    if (is.numeric(train[[as.character(form[[2]])]]) && !is.null(dim(ps))) ps <- ps[,1]
         
     trues <- responseValues(form,test)
     ## Checking for learners that do not ouput as many predictions as test cases!
@@ -301,19 +306,23 @@ timeseriesWF <- function(form,train,test,
 
         tm <- Sys.time()
         if (is.null(predictor)) {
-            ps <- do.call(learner,c(list(form,tr,ts),learner.pars))
+            #ps <- do.call(learner,c(list(form,tr,ts),learner.pars))
+            ps <- do.call(eval(parse(text=learner)),c(list(form,tr,ts),learner.pars))
             t.tr <- t.ts <- t.tr + as.numeric(Sys.time() - tm,units="secs")
             if (.fullOutput) models <- c(models,list(start=s,ps=ps))
         } else {
-            m <- do.call(learner,c(list(form,tr),learner.pars))
+            #m <- do.call(learner,c(list(form,tr),learner.pars))
+            ## The following addition of data= was caused by the "wrong" order of parameters of gbm
+            m <- do.call(eval(parse(text=learner)),c(list(form,data=train),learner.pars)) 
             t.tr <- t.tr + as.numeric(Sys.time() - tm,units="secs")
             tm <- Sys.time()
-            ps <- do.call(predictor,c(list(m,ts),predictor.pars))
+            #ps <- do.call(predictor,c(list(m,ts),predictor.pars))
+            ps <- do.call(eval(parse(text=predictor)),c(list(m,ts),predictor.pars))
             t.ts <- t.ts + as.numeric(Sys.time() - tm,units="secs")
             if (.fullOutput) models <- c(models,list(start=s,model=m,preds=ps))
         }
         ## Checking for strange things (like regression methods not returning a vector, e.g. earth)
-        if (is.numeric(tr[,as.character(form[[2]])]) && !is.null(dim(ps))) ps <- ps[,1]
+        if (is.numeric(tr[[as.character(form[[2]])]]) && !is.null(dim(ps))) ps <- ps[,1]
         
         preds <- c(preds,ps)
     }
@@ -385,23 +394,24 @@ standardPRE <- function(form,train,test,steps,...) {
             train <- na.omit(train)
             test <- na.omit(test)
         } else if (s == "undersample") {
-            if (is.numeric(train[,tgtVar])) stop("Undersampling is currently only available for classification tasks. Check http://www.dcc.fc.up.pt/~ltorgo/ExpertSystems/ for approaches applicable to regression.",call.=FALSE)
+            if (is.numeric(train[[tgtVar]])) stop("Undersampling is currently only available for classification tasks. Check CRAN package UBL for approaches applicable to regression.",call.=FALSE)
             pars <- list(...)
-            clDistr <- table(train[,tgtVar])
+            clDistr <- table(train[[tgtVar]])
             minCl <- which.min(clDistr)
             minClName <- names(minCl)
             nMin <- min(clDistr)
-            minExs <- which(train[,tgtVar] == minClName)
+            minExs <- which(train[[tgtVar]] == minClName)
             if (!("perc.under" %in% names(pars))) pars$perc.under <- 1 # default under %
             selMaj <- sample((1:NROW(train))[-minExs],
                              as.integer(pars$perc.under*nMin),
                              replace=TRUE)
             train <- train[c(minExs,selMaj),]
         } else if (s == "smote") {
-            if (is.numeric(train[,tgtVar])) stop("SMOTE is currently only available for classification tasks. Check http://www.dcc.fc.up.pt/~ltorgo/ExpertSystems/ for approaches applicable to regression.",call.=FALSE)
+            if (is.numeric(train[[tgtVar]])) stop("SMOTE is currently only available for classification tasks. Check http://www.dcc.fc.up.pt/~ltorgo/ExpertSystems/ for approaches applicable to regression.",call.=FALSE)
             train <- smote(form,train,...)
         } else {
-            user.pre <- do.call(s,c(list(form,train,test),list(...)))
+            #user.pre <- do.call(s,c(list(form,train,test),list(...)))
+            user.pre <- do.call(eval(parse(text=s)),c(list(form,train,test),list(...)))
             train <- user.pre$train
             test  <- user.pre$test
         }
@@ -426,7 +436,7 @@ knnImp <- function(data,k=10,scale=TRUE,distData=NULL) {
     
     ncol <- ncol(data)
     nomAttrs <- rep(F,ncol)
-    for(i in seq(ncol)) nomAttrs[i] <- is.factor(data[,i])
+    for(i in seq(ncol)) nomAttrs[i] <- is.factor(data[[i]])
     nomAttrs <- which(nomAttrs)
     hasNom <- length(nomAttrs)
     contAttrs <- setdiff(seq(ncol),nomAttrs)
@@ -434,7 +444,7 @@ knnImp <- function(data,k=10,scale=TRUE,distData=NULL) {
     dm <- data
     if (scale) dm[,contAttrs] <- scale(dm[,contAttrs])
     if (hasNom)
-        for(i in nomAttrs) dm[,i] <- as.integer(dm[,i])
+        for(i in nomAttrs) dm[[i]] <- as.integer(dm[[i]])
     
     dm <- as.matrix(dm)
     
@@ -442,9 +452,8 @@ knnImp <- function(data,k=10,scale=TRUE,distData=NULL) {
     if (!is.null(distData)) tgt.nas <- nas[nas <= n]
     else tgt.nas <- nas
     
-    if (length(tgt.nas) == 0)
-        warning("No case has missing values. Stopping as there is nothing to do.")
-    
+    if (length(tgt.nas) == 0)  return(data[1:n,]) # no NAs (nothing to do!)
+
     xcomplete <- dm[setdiff(distInit:N,nas),]
     if (nrow(xcomplete) < k)
         stop("Not sufficient complete cases for computing neighbors.",call.=FALSE)
@@ -462,7 +471,7 @@ knnImp <- function(data,k=10,scale=TRUE,distData=NULL) {
         dist <- sqrt(drop(dist^2 %*% rep(1,ncol(dist))))
         ks <- order(dist)[seq(k)]
         for(j in tgtAs) {
-            vals <- data[setdiff(distInit:N,nas),j][ks]
+            vals <- data[setdiff(distInit:N,nas),][[j]][ks]
             data[i,j] <- if (is.numeric(vals)) median(vals,na.rm=TRUE) else { x <- as.factor(vals) ; levels(x)[which.max(table(x))] }
         }
     }
@@ -506,16 +515,17 @@ standardPOST <- function(form,train,test,preds,steps,...) {
         ## -----------    
         } else if (s == "maxutil") {
             pars <- list(...)
-            if (is.numeric(train[,tgtVar])) stop("'maxutil'' is only available for classification tasks.",call.=FALSE)
+            if (is.numeric(train[[tgtVar]])) stop("'maxutil'' is only available for classification tasks.",call.=FALSE)
             if (!("cb.matrix" %in% names(pars))) stop("'maxutil' requires that you specify a cost-benefit matrix.",call.=FALSE)
             if (is.null(dim(preds))) stop("'maxutil' requires that the classifier outputs a matrix of probabilities as predictions.",call.=FALSE)
             if (ncol(preds) != ncol(pars$cb.matrix)) stop("Error in 'maxutil': predictions do not contain as many class probabilities as there are classes in the cost-benefit matrix.",call.=FALSE)
             ps <- apply(preds,1,function(ps) which.max(apply(pars$cb.matrix,2,function(cs) sum(ps*cs))))
-            preds <- levels(train[,tgtVar])[ps]
+            preds <- levels(train[[tgtVar]])[ps]
             
         ## -----------    
         } else {
-            preds <- do.call(s,c(list(form,train,test,preds),...))
+            #preds <- do.call(s,c(list(form,train,test,preds),...))
+            preds <- do.call(eval(parse(text=s)),c(list(form,train,test,preds),...))
         }
     }
 

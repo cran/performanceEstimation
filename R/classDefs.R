@@ -48,6 +48,7 @@ PredTask <- function(form,data,taskName=NULL,type=NULL,copy=FALSE) {
   } else {
       eval.env <- 1
       if (is.null(taskName)) taskName <-  paste(deparse(substitute(data)),tgt,sep=".")
+      data <- as.data.frame(eval(data,envir=eval.env)) # this was added because of dplyr tbl_df that were giving probls when copy=T
   }
 
   if (inherits(try(mf <- model.frame(form,eval(data,envir=eval.env),na.action=NULL),TRUE),"try-error"))
@@ -55,7 +56,7 @@ PredTask <- function(form,data,taskName=NULL,type=NULL,copy=FALSE) {
 
   
   if (is.null(type)) {
-      taskType <- if (is.factor(eval(data,envir=eval.env)[,tgt])) "class" else "regr"
+      taskType <- if (is.factor(eval(data,envir=eval.env)[[tgt]])) "class" else "regr"
   } else {
       if (!(type %in% c("class","regr","ts")))
           stop(paste("PredTask::",type,"tasks not implemented."),call.=FALSE)
@@ -299,7 +300,7 @@ setClassUnion("EstimationMethod",
 setClass("EstimationTask",
          slots=c(metrics='OptString',        # the metrics to be estimated
                  method="EstimationMethod",  # the estimation method to use
-                 evaluator='character',      # function used to calculate the metrics
+                 evaluator='OptString',      # function used to calculate the metrics
                  evaluator.pars='OptList',   # pars to this function
                  trainReq='logical'          # is the training data required?
          )
@@ -309,7 +310,7 @@ setClass("EstimationTask",
 ## constructor
 ##
 EstimationTask <- function(metrics=NULL,method=CV(),
-                           evaluator="",evaluator.pars=NULL,
+                           evaluator=NULL,evaluator.pars=NULL,
                            trainReq=FALSE) {
     new("EstimationTask",
         metrics=metrics,method=method,
@@ -351,9 +352,12 @@ EstimationResults <- function(t,w,et,sc,e) {
   o@estTask          <- et
   o@iterationsScores <- sc
   ## classification tasks, code back predictions to class labels
-  if (et@evaluator=="" & is.factor(model.response(model.frame(t@formula,eval(t@dataSource))))) {
-      for (i in 1:length(e))
-          e[[i]]$preds <- factor(e[[i]]$preds,levels=levels(responseValues(t@formula,eval(t@dataSource))))
+  if (is.null(et@evaluator)) {
+      if (is.null(et@metrics)) o@estTask@metrics <- colnames(sc)
+      if (is.factor(model.response(model.frame(t@formula,eval(t@dataSource))))) {
+          for (i in 1:length(e))
+              e[[i]]$preds <- factor(e[[i]]$preds,levels=levels(responseValues(t@formula,eval(t@dataSource))))
+      }
   }
   o@iterationsInfo  <- e
   o
